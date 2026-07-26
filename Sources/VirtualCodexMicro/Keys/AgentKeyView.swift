@@ -384,6 +384,7 @@ public struct AgentKeyView: View {
             }
 
             if p.usesDepth {
+                plasticShell
                 moulding
             }
 
@@ -400,10 +401,70 @@ public struct AgentKeyView: View {
             content(swatch, p)
         }
         .frame(width: side, height: side)
-        .background { if p.usesDepth { plateShadow(pressed: p.treatment == .pressed) } }
+        .background {
+            if p.usesDepth {
+                plateShadow(pressed: p.treatment == .pressed)
+                spill(swatch, p)
+            }
+        }
         .contentShape(keyShape)
         .scaleEffect(p.scale)
         .overlay { if p.showsFocusRing { focusRing(swatch) } }
+    }
+
+    /// Milky white plastic, drawn *over* the light — which is the whole change.
+    /// The state colour underneath used to be the surface; now it is what is
+    /// behind the surface, and this is the surface. Thin enough over the middle of
+    /// the top face to let the LED through, thickening to near-opaque white at the
+    /// sidewalls and corners the way a moulded cap does, which is what makes a lit
+    /// cap read as white plastic containing colour instead of a coloured tile.
+    ///
+    /// One monotonic ramp, clear at the centre and climbing all the way out. Both
+    /// halves of that matter:
+    ///
+    /// - **Monotonic**, because anything with a peak in it reads as a ring
+    ///   painted on the cap rather than as plastic. An earlier version put the
+    ///   brightness in an annulus, copying the moulded stem disc visible in the
+    ///   photographs, and it came out a bullseye.
+    /// - **Clear at the centre out to r≈0.19·side**, which clears a 17pt glyph.
+    ///   That is the ladder's and the label's protection, and it is not slack:
+    ///   `StateColors` measures both the 1.8 pairwise floor and the 4.5:1 label
+    ///   contrast on `composedKeyFill`, i.e. on the middle of the face, and the
+    ///   rendered stack has essentially no headroom there — the lit pairs
+    ///   composite 1.78–1.87 apart before any white is added. White over the
+    ///   centre would have closed the ladder, because near-black luminance moves
+    ///   fastest per unit of white. White outside the glyph costs it nothing, so
+    ///   the frost lives entirely in the band between the glyph and the edge.
+    ///
+    /// The corners sit past the last stop and take the whitest value, which is
+    /// what the corner highlights on a real cap do, so the rounded square gets an
+    /// even white perimeter out of a circular gradient for free.
+    private var plasticShell: some View {
+        keyShape.fill(
+            RadialGradient(
+                gradient: Gradient(stops: [
+                    .init(color: .clear, location: 0),
+                    .init(color: .clear, location: 0.38),
+                    .init(color: .white.opacity(0.04), location: 0.48),
+                    .init(color: .white.opacity(0.10), location: 0.56),
+                    .init(color: .white.opacity(0.18), location: 0.64),
+                    .init(color: .white.opacity(0.28), location: 0.72),
+                    .init(color: .white.opacity(0.40), location: 0.80),
+                    .init(color: .white.opacity(0.55), location: 0.88),
+                    .init(color: .white.opacity(0.68), location: 0.94),
+                    .init(color: .white.opacity(0.80), location: 1),
+                ]),
+                center: .center,
+                startRadius: 0,
+                endRadius: side * 0.50
+            )
+        )
+        // Softens the spoke banding a wide alpha ramp picks up when it is
+        // rasterised at 1x. Clipped back to the cap so the blur cannot leak past
+        // the silhouette and fog the plate.
+        .blur(radius: side * 0.03)
+        .clipShape(keyShape)
+        .allowsHitTesting(false)
     }
 
     /// Domed top and shaded lower sidewall, in one pass.
@@ -420,7 +481,8 @@ public struct AgentKeyView: View {
         keyShape.fill(
             LinearGradient(
                 stops: [
-                    .init(color: .white.opacity(0.32), location: 0),
+                    .init(color: .white.opacity(0.60), location: 0),
+                    .init(color: .white.opacity(0.30), location: 0.06),
                     .init(color: .white.opacity(0.07), location: 0.30),
                     .init(color: .clear, location: 0.52),
                     .init(color: .black.opacity(0.05), location: 0.72),
@@ -441,6 +503,21 @@ public struct AgentKeyView: View {
             .fill(.black.opacity(pressed ? 0.14 : 0.24))
             .blur(radius: side * (pressed ? 0.05 : 0.09))
             .offset(y: side * (pressed ? 0.02 : 0.055))
+            .allowsHitTesting(false)
+    }
+
+    /// Light escaping onto the plate around the cap. The single strongest cue in
+    /// the reference photographs that the cap is *lit* rather than *painted*:
+    /// pigment stops at the edge of the plastic, light does not. Blurred outside
+    /// the shape so it never lands on the face, which keeps the ladder and the
+    /// label contrast untouched. Brightness is `glowOpacity`, so it is a function
+    /// of state alone; press narrows it via `glowRadius`, the same way the inner
+    /// bloom already tucks in.
+    private func spill(_ swatch: StateColors.StateSwatch, _ p: Presentation) -> some View {
+        keyShape
+            .fill(swatch.stateGlow.color)
+            .blur(radius: side * (0.10 + p.glowRadius / 260))
+            .opacity(p.glowOpacity * 0.55)
             .allowsHitTesting(false)
     }
 
@@ -493,9 +570,16 @@ public struct AgentKeyView: View {
                     weight: p.motif == .lostTrack ? .bold : .regular
                 ))
                 .opacity(p.motif == .emptySlot ? 0.6 : 0.92)
+            // Dark ink rather than `keyLabel`, and not by preference. The number
+            // sits in the corner, which is the one part of the face the frost
+            // takes to near-white on every state and in both appearances — so a
+            // white-labelled state used to put a white numeral on white plastic
+            // and lose it. Engraved-grey is what the reference's own moulded
+            // markings are, and unlike `keyLabel` it is legible against the
+            // corner rather than against the centre `StateColors` measures.
             Text("\(index + 1)")
                 .font(.system(size: layout.fontSize(9), weight: .semibold).monospacedDigit())
-                .opacity(0.4)
+                .foregroundStyle(.black.opacity(0.42))
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .foregroundStyle(swatch.keyLabel.color)

@@ -196,19 +196,37 @@ final class PanelController: NSObject, NSWindowDelegate {
 
     // MARK: - Focus loss
 
-    /// Fires when the panel had keyboard focus and lost it — the user clicked
-    /// back into a window that was already frontmost, so no app activation
-    /// occurs and `didActivateApplication` never sees it.
-    func windowDidResignKey(_ notification: Notification) {
-        hideIfUnpinned()
-    }
+    /// Deliberately does NOT hide the panel, despite that being the obvious
+    /// reading of "unpinned means hide on focus loss".
+    ///
+    /// Found by clicking the thing: this app is `.accessory` and the panel is
+    /// `.nonactivatingPanel`, so a click gives the panel key status **without
+    /// activating the app**. The frontmost application's own window reclaims key
+    /// almost immediately, this fires, and the panel hides itself. The result was
+    /// that clicking the panel dismissed it — the single worst possible response
+    /// to a click, and invisible to every check we have because it needs a real
+    /// pointer.
+    ///
+    /// The case this path was written for — clicking a window that was already
+    /// frontmost, which raises no activation notification — is now not covered, so
+    /// the panel stays up in that situation. That is a far smaller cost than a
+    /// control surface that vanishes when touched.
+    func windowDidResignKey(_ notification: Notification) {}
 
     /// Fires when the user switches to a different app, which the panel losing
     /// key status does not cover: an unpinned panel that was never clicked never
     /// had key status to resign.
+    /// True while the pointer is over the panel. A second guard on hiding: even a
+    /// correct activation event should not yank the surface out from under a
+    /// pointer that is on it.
+    private var pointerIsInside: Bool {
+        panel.frame.contains(NSEvent.mouseLocation)
+    }
+
     @objc private func activeApplicationChanged(_ notification: Notification) {
         let activated = notification.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication
         guard activated?.processIdentifier != ProcessInfo.processInfo.processIdentifier else { return }
+        guard !pointerIsInside else { return }
         hideIfUnpinned()
     }
 

@@ -41,6 +41,12 @@ final class PanelCoordinator: ObservableObject {
     /// like a bug rather than the honest abstention it is for a real source.
     static let mockSource = StateSource.mock(id: "mock", stalenessThreshold: 3600)
 
+    /// Colour test: when set, every slot reports this state, so the caps AND the
+    /// aggregate underglow can be judged one colour at a time. The glow is
+    /// most-urgent-wins, so mixed states only ever show the most urgent colour —
+    /// seeing all seven means driving all six slots together.
+    @Published private(set) var colorTestState: AgentState?
+
     /// Slot currently showing its detail popover, owned here so only one opens.
     @Published var detailSlot: Int?
 
@@ -81,9 +87,29 @@ final class PanelCoordinator: ObservableObject {
     private var demoCapabilities: SessionCapabilities = .observed
 
     func start() {
+        if ProcessInfo.processInfo.environment["VCM_COLORTEST"] != nil {
+            runColorTest()
+            return
+        }
         Task { await bootstrap() }
         driftObserver = DriftTriggerObserver { [weak self] trigger in
             self?.reconcile(trigger)
+        }
+    }
+
+    /// Walk every state, all six keys together, holding each long enough to look
+    /// at. Ends on `unassigned` so the resting appearance is visible too.
+    private func runColorTest() {
+        Task { @MainActor in
+            let hold = Duration.milliseconds(2600)
+            while !Task.isCancelled {
+                for state in AgentState.allCases {
+                    colorTestState = state
+                    log.record(ActivityEntry(at: Date(), event: .note("colour test: \(state.label)")))
+                    activity = log.entries(limit: 32)
+                    try? await Task.sleep(for: hold)
+                }
+            }
         }
     }
 
@@ -263,6 +289,7 @@ final class PanelCoordinator: ObservableObject {
     // MARK: - Views ask these
 
     func state(at slot: Int) -> AgentState {
+        if let forced = colorTestState { return forced }
         if let demo = demoStates { return demo[slot] ?? .unassigned }
         return resolutions[slot]?.state ?? .unassigned
     }
