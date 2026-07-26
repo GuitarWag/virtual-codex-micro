@@ -308,7 +308,15 @@ struct DeviceChrome: View {
     private var plate: some View {
         ZStack {
             plateShape
-                .fill(Color(nsColor: .controlBackgroundColor))
+                // Near-white, not `controlBackgroundColor`, which resolves to a grey
+                // that made the whole base read as grey plastic. The reference plate
+                // is white with shading doing the work, so the base colour is white
+                // and the gradient below supplies the form.
+                .fill(Color(nsColor: NSColor(name: nil) { appearance in
+                    appearance.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua
+                        ? NSColor(white: 0.16, alpha: 1)
+                        : NSColor(white: 0.97, alpha: 1)
+                }))
                 .shadow(color: .black.opacity(0.22), radius: 2.5, x: 0, y: 1)
             if !reduceTransparency {
                 plateShape.fill(

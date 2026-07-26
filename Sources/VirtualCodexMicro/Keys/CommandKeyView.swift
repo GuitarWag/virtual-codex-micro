@@ -257,6 +257,30 @@ public struct CommandKeyView: View {
                 ZStack {
                     shape.fill(capBody(enabled: enabled))
                     if lit { shape.fill(gloss) }
+                    // The dish. A real keycap's top face is concave, and that dish is
+                    // most of what makes the reference photo read as an object rather
+                    // than a rounded rectangle: a soft dark arc where the surface
+                    // turns away from the light, and a highlight where it turns
+                    // toward it. Inset well inside the cap so the icon still sits on
+                    // flat, measured ground.
+                    if lit, !reduceTransparency {
+                        Circle()
+                            .fill(
+                                RadialGradient(
+                                    stops: [
+                                        .init(color: .black.opacity(0.045), location: 0.0),
+                                        .init(color: .black.opacity(0.02), location: 0.55),
+                                        .init(color: .clear, location: 0.78),
+                                        .init(color: .white.opacity(0.55), location: 1.0),
+                                    ],
+                                    center: .init(x: 0.5, y: 0.42),
+                                    startRadius: 0,
+                                    endRadius: min(size.width, size.height) * 0.46
+                                )
+                            )
+                            .padding(min(size.width, size.height) * 0.11)
+                            .blur(radius: min(size.width, size.height) * 0.03)
+                    }
                 }
             }
             .overlay(edge(shape, enabled: enabled))

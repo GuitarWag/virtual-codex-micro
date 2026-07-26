@@ -18,13 +18,18 @@ enum OffscreenRender {
 
         for (suffix, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
             let layout = PanelLayout.regular
+            // VCM_CAPS=owned renders the command cluster enabled. Without it the
+            // demo uses .observed, where five of six caps are disabled and the
+            // cluster's real appearance cannot be judged.
+            let caps: SessionCapabilities =
+                ProcessInfo.processInfo.environment["VCM_CAPS"] == "owned" ? .owned : .observed
             let forced = ProcessInfo.processInfo.environment["VCM_GLOW"]
                 .flatMap { AgentState(rawValue: $0) }
             let view = PanelRootView(
                 coordinator: .demo(
                     states: demoStates(suffix),
                     sessions: demoSessions(suffix),
-                    capabilities: .observed,  // shows the disabled command treatment
+                    capabilities: caps,
                     glow: forced
                 ),
                 layout: layout
