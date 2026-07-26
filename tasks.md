@@ -16,10 +16,6 @@
   > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-028] **Drift guard: reconcile on wake and focus** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-24`
-  > Re-verify every bound session on app foreground, display wake and system wake: is the process still alive, is the transcript still growing, did we miss events while asleep. Anything unverifiable goes to `unknown`. Directly addresses the PRD's first-named risk — a panel confidently showing a stale colour is worse than one admitting it lost track.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-029] **Overflow handling beyond six sessions** `priority:medium` `assignee:claude` `tags:m2,ui` `due:2026-09-25`
   > Count badge for unbound sessions plus paging or a chooser, with priority given to surfacing any session in needs-input or error that has no slot. Answers the PRD open question about representing more than six agents. Silent truncation is not acceptable here: a hidden blocked agent defeats the purpose of the panel.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-027] **Activity strip and local event log** `priority:medium` `assignee:claude` `tags:m2,state` `due:2026-09-22`
   > Subtle strip showing the most recent state changes and dispatched actions, backed by a bounded in-memory ring buffer with an inspectable full view. Exists for trust and debugging: when the panel and reality disagree, this is what tells the user which event we did or did not receive. Stays local, no network.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-028] **Drift guard: reconcile on wake and focus** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-24`
+  > Re-verify every bound session on app foreground, display wake and system wake: is the process still alive, is the transcript still growing, did we miss events while asleep. Anything unverifiable goes to `unknown`. Directly addresses the PRD's first-named risk — a panel confidently showing a stale colour is worse than one admitting it lost track.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

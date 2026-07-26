@@ -56,6 +56,8 @@ enum SelfCheck {
         failures += SessionRegistry.selfCheckFailures().map { "registry: \($0)" }
         failures += SessionPopover.selfCheckFailures().map { "popover: \($0)" }
         failures += ClaudeHookSource.selfCheckFailures().map { "hooks: \($0)" }
+        failures += ActivityLog.selfCheckFailures().map { "activity: \($0)" }
+        failures += DriftGuard.selfCheckFailures().map { "drift: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")
