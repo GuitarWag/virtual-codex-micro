@@ -8,10 +8,6 @@
   > Review the prototype against the reference control map and against the PRD's own risk of overfitting to mimicry. Confirm someone familiar with the hardware recognises the structure immediately, that labels and hit targets survived the fidelity push, and that nothing in the visuals or copy reads as an official product. Written go/no-go before M2 starts.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-020] **Session registry with persistent key bindings** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-02`
-  > Persist which session occupies which of the six slots so a key keeps meaning the same thread across app restarts and machine sleep. Handle the reconnect cases explicitly: session still alive, session gone, session replaced by a new one in the same repo. A stale binding must resolve to `unknown` and offer rebind, never silently re-point at a different thread.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-021] **Claude Code adapter: observe path via hooks** `priority:critical` `assignee:claude` `tags:m2,backend,state` `due:2026-09-06`
   > Local event receiver plus an idempotent installer that adds our hook entries to ~/.claude/settings.json without touching or duplicating existing user hooks, with explicit consent and a clean uninstall. Maps received events to normalized states using the table produced by the M0 hook spike. Primary state source for sessions the user started themselves — and, per the tailing spike, the ONLY possible source for `needsInput`, since a pending permission prompt leaves no trace on disk. That makes this task load-bearing rather than merely preferred: if a user declines hook installation, the panel must state that `needsInput` is unavailable rather than silently never lighting the amber key. SETTLED by the hook spike, and the plan's assumption was wrong: `Notification` is debounced by a fixed 6s idle timer, suppressed while the user is active, interactive-only, and shares a channel with ten unrelated notification types. Use `PermissionRequest` instead — 1ms, unconditional, and it carries tool_name, tool_input and permission_suggestions, which the accept/reject keys also need. Keep `Notification` only for notification_type=idle_prompt. Two hard constraints: `SessionStart` MUST be a command hook because http silently receives zero SessionStart events, and that command hook is also how we get CLAUDE_PID for liveness and window focus. Filter any event carrying `agent_id` or subagent events will thrash the slot. Hooks block the transition synchronously, so use command+async:true or treat listener latency as a hard budget — a wedged listener degrades the user's Claude Code, which is worse than a wrong colour. `error` remains UNVERIFIED: StopFailure never fired in 12 sessions.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-018] **Normalized state engine** `priority:critical` `assignee:claude` `tags:m2,state` `due:2026-08-28`
   > Owns the seven-state model and the legal transitions between them, independent of any provider vocabulary. Includes a staleness timer: a source that goes quiet past its threshold drives the key to `unknown` rather than leaving the last known colour on screen. Provider-specific statuses are mapped in at the adapter boundary, so the views never see a raw backend string.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-020] **Session registry with persistent key bindings** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-02`
+  > Persist which session occupies which of the six slots so a key keeps meaning the same thread across app restarts and machine sleep. Handle the reconnect cases explicitly: session still alive, session gone, session replaced by a new one in the same repo. A stale binding must resolve to `unknown` and offer rebind, never silently re-point at a different thread.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED
