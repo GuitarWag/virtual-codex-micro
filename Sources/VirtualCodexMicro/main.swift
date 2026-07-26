@@ -58,6 +58,33 @@ if ProcessInfo.processInfo.environment["VCM_SELFTEST"] != nil {
     SelfCheck.run()
 }
 
+/// Integration probe: report what the live sources actually see on this machine
+/// and exit. No window, no hooks installed, read-only. Exists because "the panel
+/// shows six keys" says nothing about whether those keys came from real sessions —
+/// stale bindings from an earlier run look identical to fresh discovery.
+if ProcessInfo.processInfo.environment["VCM_PROBE"] != nil {
+    let live = ClaudeTranscriptSource.liveSessions()
+    var source = ClaudeTranscriptSource()
+    let readings = source.poll(now: Date(), liveSessions: live)
+
+    print("live claude processes with a --session-id: \(live.count)")
+    for (id, pid) in live.sorted(by: { $0.key < $1.key }) {
+        print("  pid \(pid)  \(id)")
+    }
+    print("\ntranscript readings: \(readings.count)")
+    let interesting = readings.filter { $0.state != .unknown }
+    print("  states resolved: \(interesting.count), abstained to unknown: \(readings.count - interesting.count)")
+    for r in readings.sorted(by: { $0.observedAt > $1.observedAt }).prefix(12) {
+        let pid = r.pid.map(String.init) ?? "-"
+        print("  \(r.state.rawValue.padding(toLength: 11, withPad: " ", startingAt: 0)) pid=\(pid.padding(toLength: 6, withPad: " ", startingAt: 0)) \(r.sessionID.prefix(8))  \(r.reason)")
+    }
+    let hookSpool = ClaudeHookSource.defaultSpoolDirectory
+    let spoolExists = FileManager.default.fileExists(atPath: hookSpool.path)
+    print("\nhook spool: \(spoolExists ? "present" : "ABSENT — hooks are not installed, so needsInput can never fire")")
+    print("hook events waiting: \(ClaudeHookSource().drainNow().count)")
+    exit(0)
+}
+
 let delegate = AppDelegate()
 let app = NSApplication.shared
 app.delegate = delegate
