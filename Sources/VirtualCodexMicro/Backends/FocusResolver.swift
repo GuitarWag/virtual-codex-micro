@@ -263,10 +263,35 @@ public enum FocusResolver {
         }
 
         if plan.tier == .appOnly {
-            // NSRunningApplication rather than `tell application "X" to activate`:
-            // no Automation grant needed, and it physically cannot launch an app
-            // that is not already running.
+            // NSRunningApplication.activate first — no Automation grant needed and it
+            // cannot launch anything — but it is NOT sufficient on its own.
+            //
+            // Measured: it silently fails from this app. macOS 14+ refuses one app
+            // the right to activate another unless the caller is itself active, and
+            // this app is `.accessory` with a `.nonactivatingPanel`, so it is never
+            // active by design. The user saw exactly this: clicking a key reported
+            // "cmux did not come forward — another app is holding focus", every time.
+            //
+            // `NSWorkspace.openApplication` is not subject to that restriction —
+            // `open -a cmux` brings it forward from a background process, verified
+            // against a Finder-frontmost baseline. It CAN launch an app, which is why
+            // it stays behind the `runningApp(bundlePath:)` guard above: we only ever
+            // reach here for an app already running, so it activates rather than
+            // launches.
             app.activate(options: [])
+            if waitForFrontmost(app) {
+                return outcome(.appOnly, verified: true, plan.reason)
+            }
+
+            let configuration = NSWorkspace.OpenConfiguration()
+            configuration.activates = true
+            let bundleURL = URL(filePath: hostPath)
+            let semaphore = DispatchSemaphore(value: 0)
+            NSWorkspace.shared.openApplication(at: bundleURL, configuration: configuration) { _, _ in
+                semaphore.signal()
+            }
+            _ = semaphore.wait(timeout: .now() + 2)
+
             let ok = waitForFrontmost(app)
             return outcome(.appOnly, verified: ok,
                            ok ? plan.reason : "\(plan.hostName ?? "The app") did not come forward — another app is holding focus.")

@@ -50,6 +50,21 @@ final class PanelCoordinator: ObservableObject {
     /// Slot currently showing its detail popover, owned here so only one opens.
     @Published var detailSlot: Int?
 
+    /// The slot the command cluster and the dial act on.
+    ///
+    /// This did not exist, and its absence was a real defect rather than an
+    /// omission: `dispatch` targeted `detailSlot ?? 0` and the cluster's enabled
+    /// state read slot 0, so clicking an agent key raised its terminal but never
+    /// made it the command target. Pressing accept would have acted on slot 0
+    /// whatever you had just clicked — on an approval dialog, the worst available
+    /// class of bug. Defaults to slot 0 so the cluster is never targetless.
+    @Published private(set) var selectedSlot: Int = 0
+
+    func select(_ slot: Int) {
+        guard (0 ..< PanelLayout.agentKeyCount).contains(slot) else { return }
+        selectedSlot = slot
+    }
+
     init() {
         // Every source must be registered before it can record: an unregistered
         // source's readings are rejected, which is the behaviour we want for a
@@ -354,14 +369,25 @@ final class PanelCoordinator: ObservableObject {
         return .observed
     }
 
+    /// Capabilities of the SELECTED session, so the cluster shows what the keys
+    /// would actually do to the session you picked.
     var focusedCapabilities: SessionCapabilities? {
-        detailSlot.flatMap(capabilities(at:)) ?? capabilities(at: 0)
+        capabilities(at: selectedSlot)
     }
 
     // MARK: - Actions
 
     func activateAgentKey(_ slot: Int) {
-        guard let binding = registry.binding(at: slot) else { return }
+        // Select first, so the command cluster retargets even when the session
+        // cannot be focused — an unfocusable session is still one you may want to
+        // act on, and tier 3 is common (a bare `claude` carries no session id).
+        select(slot)
+        guard let binding = registry.binding(at: slot) else {
+            log.record(ActivityEntry(at: Date(), slot: slot,
+                                     event: .note("slot \(slot + 1) selected; nothing bound to focus")))
+            refresh(discovered: discoveredSessions)
+            return
+        }
         // Focus is the one action available on a session we do not own, and it
         // reports a tier rather than a boolean — the UI must not promise more.
         guard let pid = binding.pid ?? knownPIDs[binding.sessionID] ?? nil else {
@@ -379,7 +405,7 @@ final class PanelCoordinator: ObservableObject {
     }
 
     func dispatch(_ slot: PanelLayout.CommandSlot) {
-        let target = detailSlot ?? 0
+        let target = selectedSlot
         guard let binding = registry.binding(at: target) else {
             log.record(ActivityEntry(at: Date(), event: .note(
                 "\(slot.rawValue): nothing bound to act on")))

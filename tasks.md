@@ -6,6 +6,11 @@
 
 ## IN PROGRESS
 
+- [>] [T-VCMPLAN1-051] **cmux adapter: full control for cmux-hosted sessions** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-09-20`
+  > Overturns the conclusion that cmux sessions can only ever be observed. cmux ships a Unix-socket CLI at /Applications/cmux.app/Contents/Resources/bin/cmux that exposes everything the AppleScript surface lacked: `top --processes --format tsv` joins surface ref to pid to workspace; `focus-pane`/`select-workspace`/`tab-action` target a specific surface, so focus becomes Tier 1 rather than app-only; `send-key --surface <ref> <key>` delivers a keystroke to a NAMED surface rather than to whatever holds focus, which was the entire safety objection; `read-screen --surface <ref>` reads it back, so an injection can be verified before and after. No Accessibility permission, no focus race.
+  > Better still, `cmux events --after <seq> --cursor-file <path>` is a resumable sequenced stream of the agent hooks cmux already receives (agent.hook.PreToolUse etc. with session_id, cwd, tool_name, workspace_id). That solves the cold-start gap our own hooks structurally cannot, since hooks are edge-triggered with no snapshot. For cmux-hosted sessions this is a better state source than our own hook install, and it may make the unresolved question of whether cmux's flag-precedence --settings shadows our hooks irrelevant.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
 ## DONE
 
 - [x] [T-VCMPLAN1-048] **Move the achromatic channel off the cap fill** `priority:high` `assignee:claude` `tags:m1,a11y,ui` `due:2026-09-13`

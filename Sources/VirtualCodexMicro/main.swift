@@ -136,6 +136,23 @@ if let action = ProcessInfo.processInfo.environment["VCM_HOOKAPPLY"] {
     exit(0)
 }
 
+/// Drive the focus resolver against one pid and report the tier and outcome.
+/// Diagnostic for "clicking the key does nothing": it separates "the resolver
+/// cannot target this emulator" from "the click never reached the resolver".
+if let pidText = ProcessInfo.processInfo.environment["VCM_FOCUS"], let pid = Int32(pidText) {
+    let plan = FocusResolver.resolve(pid: pid)
+    print("pid \(pid)")
+    print("  tty          : \(plan.tty ?? "-")")
+    print("  host         : \(plan.hostBundlePath ?? "-")")
+    print("  tmux target  : \(plan.tmuxTarget ?? "-")")
+    print("  tier         : \(plan.tier.rawValue) (1=window+tab, 2=app only, 3=impossible)")
+    print("  reason       : \(plan.reason)")
+    let outcome = await FocusResolver.focus(pid: pid, cachedTTY: nil)
+    print("  ACTED -> tier \(outcome.tier.rawValue), verified: \(outcome.verified)")
+    print("  outcome      : \(outcome.reason)")
+    exit(0)
+}
+
 if ProcessInfo.processInfo.environment["VCM_PROBE"] != nil {
     let live = ClaudeTranscriptSource.liveSessions()
     var source = ClaudeTranscriptSource()

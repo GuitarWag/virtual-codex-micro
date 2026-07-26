@@ -483,15 +483,39 @@ public struct ClaudeTranscriptSource: Sendable {
             guard line.contains("claude") else { continue }
             let fields = line.split(separator: " ", omittingEmptySubsequences: true)
             guard let pid = Int32(fields.first ?? "") else { continue }
+            // `--session-id` AND `--resume`. Matching only the former missed every
+            // session launched by cmux, which is how the sessions on this machine
+            // actually start: `claude --settings <inline JSON> --resume <uuid>`, with
+            // no --session-id anywhere in argv. The consequence was not subtle — no
+            // pid meant no liveness and, worse, FocusResolver reporting tier 3 "no
+            // controlling terminal" for sessions sitting plainly on ttys000, because
+            // it never got a pid to resolve a tty from.
+            //
+            // `--resume <uuid>` carries the session id being resumed, which is the id
+            // the transcript is keyed by, so it joins correctly. A bare `claude` with
+            // neither flag stays invisible, and that limit is real.
             for (index, field) in fields.enumerated() {
-                if field == "--session-id", index + 1 < fields.count {
-                    live[String(fields[index + 1])] = pid
-                } else if field.hasPrefix("--session-id=") {
-                    live[String(field.dropFirst("--session-id=".count))] = pid
+                for flag in ["--session-id", "--resume", "-r"] {
+                    if field == flag, index + 1 < fields.count {
+                        let candidate = String(fields[index + 1])
+                        // Only accept a uuid: `-r` also accepts a fuzzy match string,
+                        // and `--resume` can be passed bare to open a picker.
+                        if Self.looksLikeSessionID(candidate) { live[candidate] = pid }
+                    } else if field.hasPrefix(flag + "=") {
+                        let candidate = String(field.dropFirst(flag.count + 1))
+                        if Self.looksLikeSessionID(candidate) { live[candidate] = pid }
+                    }
                 }
             }
         }
         return live
+    }
+
+    /// A session id is a uuid. Checked rather than assumed because `-r` also takes
+    /// a fuzzy search string, and binding a slot to the pid of whatever process
+    /// happened to carry a non-uuid argument would be worse than finding nothing.
+    static func looksLikeSessionID(_ text: String) -> Bool {
+        text.count == 36 && UUID(uuidString: text) != nil
     }
 
     // MARK: - Reading the file
