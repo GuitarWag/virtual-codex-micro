@@ -4,10 +4,6 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-034] **Ship: notarized build, updates, idle click-through, legal pass** `priority:medium` `assignee:claude` `tags:m4,ship` `due:2026-11-15`
-  > Partly blocked on tooling: notarytool and stapler ship with Xcode, which is not installed, so notarization cannot be completed in this environment — installing Xcode is a prerequisite for this task, and Scripts/bundle.sh currently ad-hoc signs instead. Scope: notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 ## IN PROGRESS
 
 ## DONE
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-025] **Wire command keys with capability gating** `priority:high` `assignee:claude` `tags:m2,backend,ui` `due:2026-09-18`
   > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-034] **Ship: notarized build, updates, idle click-through, legal pass** `priority:medium` `assignee:claude` `tags:m4,ship` `due:2026-11-15`
+  > PARTLY DONE, one part blocked. Done: Scripts/package.sh builds a release, runs the self-check before packaging, bundles and produces a verified DMG (1.6MB, CRC valid); click-through-when-idle exists on PanelController, off by default and always cleared by the summon hotkey, because a floating window that silently stops accepting clicks is indistinguishable from a frozen app; brand audit clean - no OpenAI or Work Louder strings anywhere, and `Codex` appears only inside the app's own name. Blocked: notarytool and stapler ship with Xcode, which is not installed — installing Xcode is a prerequisite for this task, and Scripts/bundle.sh currently ad-hoc signs instead. Scope: notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

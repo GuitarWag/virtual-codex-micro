@@ -155,6 +155,21 @@ final class PanelController: NSObject, NSWindowDelegate {
         if isVisible { hide() } else { show() }
     }
 
+    /// Let clicks fall through to whatever is behind the panel.
+    ///
+    /// Deliberately shipped last and off by default. A floating always-on-top
+    /// window that silently stops accepting clicks is indistinguishable from a
+    /// frozen app, so this only ever engages on explicit opt-in — and the summon
+    /// hotkey always clears it, which is the escape hatch that makes it safe to
+    /// offer at all. Never engage it while a key is asking for attention: a user
+    /// reaching for an amber key and hitting their editor instead is the worst
+    /// version of this feature.
+    func setClickThrough(_ enabled: Bool) {
+        panel.ignoresMouseEvents = enabled
+    }
+
+    var isClickThrough: Bool { panel.ignoresMouseEvents }
+
     func setPinned(_ pinned: Bool) {
         isPinned = pinned
         defaults.set(pinned, forKey: Self.pinnedKey)
