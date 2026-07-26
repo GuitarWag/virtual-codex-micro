@@ -55,6 +55,7 @@ enum SelfCheck {
         failures += ClaudeTranscriptSource.selfCheckFailures().map { "tail: \($0)" }
         failures += SessionRegistry.selfCheckFailures().map { "registry: \($0)" }
         failures += SessionPopover.selfCheckFailures().map { "popover: \($0)" }
+        failures += ClaudeHookSource.selfCheckFailures().map { "hooks: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

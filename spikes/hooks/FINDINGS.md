@@ -22,7 +22,8 @@ bookkeeping) and appends transcripts under `~/.claude/projects/`. Not caused by 
 
 ## The real event list
 
-`hook_event_name` is a closed enum of **30** values in 2.1.220, extracted from the binary's own zod
+`hook_event_name` is a closed enum of **31** values in 2.1.220 (an earlier draft of this
+document said 30 while listing 31; the list was right, the count was wrong), extracted from the binary's own zod
 schema, not from docs:
 
 ```

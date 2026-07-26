@@ -105,7 +105,7 @@ sessions as dead); and a `ps` liveness join must ship alongside, because without
 are the same colour.
 
 **Hooks — the right primary source, but the plan named the wrong events**
-(`spikes/hooks/FINDINGS.md`). `hook_event_name` is a closed enum of **30** values in 2.1.220, extracted
+(`spikes/hooks/FINDINGS.md`). `hook_event_name` is a closed enum of **31** values in 2.1.220, extracted
 from the binary's own schema. The five this plan listed were the wrong five, and the important one was
 missing entirely.
 
