@@ -51,6 +51,7 @@ enum SelfCheck {
         failures += MockBackend.selfCheckFailures().map { "mock: \($0)" }
         failures += FocusOrder.selfCheckFailures().map { "focusorder: \($0)" }
         failures += StateEngine.selfCheckFailures().map { "engine: \($0)" }
+        failures += FocusResolver.selfCheckFailures().map { "focus: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

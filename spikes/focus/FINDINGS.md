@@ -24,7 +24,8 @@ environment variable will send you to an app that does not exist.
 
 `host-for-pid.sh` implements it and prints `<tty> <host .app> <tmux target>`:
 
-1. `ps -o tty= -p <pid>` → `s007` → `/dev/ttys007`. A process showing `??` has no controlling terminal and
+1. `ps -o tty= -p <pid>` → `ttys007` → `/dev/ttys007`. (An earlier draft of this document wrote the
+   field as `s007`; the running `ps` prints `ttys007`, and fixtures built on the wrong form fail.) A process showing `??` has no controlling terminal and
    is unfocusable by any path here.
 2. If tmux is installed, match the tty against
    `tmux list-panes -a -F '#{pane_tty} #{session_name}:#{window_index}.#{pane_index}'`. This must come
