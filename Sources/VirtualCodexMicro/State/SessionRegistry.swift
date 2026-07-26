@@ -612,7 +612,7 @@ public extension SessionRegistry {
             )
         }
 
-        // 1. Round trip: all six slots survive a fresh registry over the same store.
+        // 1. Round trip: every slot survives a fresh registry over the same store.
         let store = MemoryBindingStore()
         var engine = StateEngine(sources: sources)
         var registry = SessionRegistry(store: store)
@@ -621,7 +621,11 @@ public extension SessionRegistry {
         }
         let reloaded = SessionRegistry(store: store)
         check("round trip lost bindings", reloaded.bindings == registry.bindings)
-        check("round trip stored fewer than six slots", reloaded.bindings.compactMap { $0 }.count == 6)
+        // Derived, not literal: slotCount tracks PanelLayout.agentKeyCount, which
+        // moved from 6 to 8 when the encoder and joystick cells became keys. A
+        // hardcoded 6 turned a correct widening into two check failures.
+        check("round trip stored fewer than \(SessionRegistry.slotCount) slots",
+              reloaded.bindings.compactMap { $0 }.count == SessionRegistry.slotCount)
         check("round trip logged a warning", reloaded.warnings.isEmpty)
         for index in 0 ..< SessionRegistry.slotCount {
             check(
@@ -784,7 +788,7 @@ public extension SessionRegistry {
             ("unreadable", MemoryBindingStore(readError: MemoryBindingStore.Failure.unreadable)),
         ] {
             let broken = SessionRegistry(store: badStore)
-            check("\(label) store did not yield six slots", broken.bindings.count == SessionRegistry.slotCount)
+            check("\(label) store did not yield \(SessionRegistry.slotCount) slots", broken.bindings.count == SessionRegistry.slotCount)
             check("\(label) store yielded a binding", broken.bindings.allSatisfy { $0 == nil })
             check("\(label) store logged no reason", !broken.warnings.isEmpty)
         }
@@ -822,7 +826,9 @@ public extension SessionRegistry {
         // 10. Out-of-range slots are refused rather than trapping.
         var edge = SessionRegistry(store: MemoryBindingStore())
         var edgeEngine = StateEngine(sources: sources)
-        check("binding to slot 6 was accepted", !edge.bind(session("nope"), to: 6, engine: &edgeEngine, at: t0).bound)
+        let pastEnd = SessionRegistry.slotCount
+        check("binding to slot \(pastEnd) was accepted",
+              !edge.bind(session("nope"), to: pastEnd, engine: &edgeEngine, at: t0).bound)
         check("binding to slot -1 was accepted", !edge.bind(session("nope"), to: -1, engine: &edgeEngine, at: t0).bound)
         check("out-of-range bind logged nothing", !edge.warnings.isEmpty)
         check("swap with an out-of-range slot succeeded", !edge.move(from: 0, to: 9))

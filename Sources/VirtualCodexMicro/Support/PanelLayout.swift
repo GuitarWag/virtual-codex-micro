@@ -78,7 +78,7 @@ public struct PanelLayout: Sendable, Equatable {
 
     // MARK: - Base geometry, in points at regular size
 
-    public static let agentKeyCount = 6
+    public static let agentKeyCount = 8
     public static let columns = 4
     public static let rows = 4
 
@@ -176,10 +176,21 @@ public struct PanelLayout: Sendable, Equatable {
 
     // MARK: - Agent keys
 
-    /// Row 0 columns 1–2, then all of row 1. Reading order, so key 0 is the
-    /// top-left *agent* key rather than the top-left cell.
+    /// Both top rows, in reading order.
+    ///
+    /// The reference device spends its two top-corner cells on a rotary encoder and
+    /// a joystick, and this layout followed it. Neither earned the space: the
+    /// encoder's value was never dispatched anywhere, and the pad shipped with all
+    /// four presets unbound. Two dead controls cost two agent slots, and agent slots
+    /// are the entire product — so the corners became keys 0 and 3.
+    ///
+    /// This is a deliberate departure from hardware fidelity. `dialFrame` and
+    /// `padZone` still compute so `DialView` and `DirectionPadView` keep compiling
+    /// with their checks intact, but nothing composes them and they are absent from
+    /// `hitTargets`.
     private static let agentCells: [(row: Int, column: Int)] = [
-        (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (1, 3),
+        (0, 0), (0, 1), (0, 2), (0, 3),
+        (1, 0), (1, 1), (1, 2), (1, 3),
     ]
 
     public var agentKeyFrames: [CGRect] {
@@ -269,7 +280,14 @@ public struct PanelLayout: Sendable, Equatable {
 
     // MARK: - Hit targets
 
-    /// Every interactive element, in traversal order. The joystick is one entry.
+    /// Every interactive element, in traversal order.
+    ///
+    /// The encoder and joystick are deliberately absent: their cells are agent keys
+    /// 0 and 3 now. `dialFrame` and `padZone` still compute, so `DialView` and
+    /// `DirectionPadView` keep compiling with their own checks intact, but they are
+    /// not composed and must not be listed here — leaving them in made the overlap
+    /// sweep report agent 0 colliding with the dial, which is the check correctly
+    /// noticing that one cell cannot be two targets.
     public var hitTargets: [HitTarget] {
         var targets: [HitTarget] = []
         for (index, frame) in agentKeyFrames.enumerated() {
@@ -278,17 +296,10 @@ public struct PanelLayout: Sendable, Equatable {
         for slot in CommandSlot.allCases {
             targets.append(HitTarget(name: "command \(slot.rawValue)", frame: commandKeyFrame(slot), zone: .commands))
         }
-        targets.append(HitTarget(name: "dial ring", frame: dialFrame, zone: .dial))
-        targets.append(HitTarget(name: "dial reset", frame: dialCenterFrame, zone: .dial, nested: true))
-        targets.append(HitTarget(name: "joystick", frame: padZone, zone: .pad))
         // The reference device puts status LEDs in this cell, which makes it the
         // honest home for the overflow indicator rather than a gap squeezed
         // between zones — and unlike that gap, it clears the hit floor.
         targets.append(HitTarget(name: "overflow", frame: statusClusterFrame, zone: .status))
-        for direction in PadDirection.allCases {
-            targets.append(HitTarget(name: "pad \(direction.rawValue)", frame: padFrame(direction),
-                                     zone: .pad, nested: true))
-        }
         return targets
     }
 

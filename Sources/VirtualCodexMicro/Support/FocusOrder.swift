@@ -75,16 +75,12 @@ public struct FocusOrder: Sendable, Equatable {
     public enum Target: Hashable, Sendable {
         case agent(Int)
         case command(PanelLayout.CommandSlot)
-        case dial
-        case joystick
         case overflow
 
         public var hitTargetName: String {
             switch self {
             case .agent(let index): "agent \(index)"
             case .command(let slot): "command \(slot.rawValue)"
-            case .dial: "dial ring"
-            case .joystick: "joystick"
             case .overflow: "overflow"
             }
         }
@@ -93,8 +89,6 @@ public struct FocusOrder: Sendable, Equatable {
             switch self {
             case .agent: .agents
             case .command: .commands
-            case .dial: .dial
-            case .joystick: .pad
             case .overflow: .status
             }
         }
@@ -106,8 +100,7 @@ public struct FocusOrder: Sendable, Equatable {
     public static let all: [Target] =
         (0 ..< PanelLayout.agentKeyCount).map { Target.agent($0) }
             + PanelLayout.CommandSlot.allCases.map { Target.command($0) }
-            + [.dial]
-            + [.joystick, .overflow]
+            + [.overflow]
 
     // MARK: - What is currently reachable
 
@@ -152,13 +145,6 @@ public struct FocusOrder: Sendable, Equatable {
             true
         case .command(let slot):
             CommandKeyView.isEnabled(slot, capabilities: capabilities, canSpawnSessions: canSpawnSessions)
-        case .dial:
-            dialAcceptsInput
-        case .joystick:
-            // One control now, not five keys — the reference device has a single
-            // stick. It is live if any direction is bound, or always, because its
-            // centre opens the preset chooser.
-            true
         case .overflow:
             // Reachable only when there is something to overflow. An empty chip
             // renders nothing, so focusing it would be a dead stop.
@@ -296,7 +282,7 @@ public struct FocusOrder: Sendable, Equatable {
         // 3. Zones are walked as contiguous runs, in the documented order. A zone
         //    interleaved with another is the version of this order that reads as
         //    random when tabbed through.
-        let expectedZones: [PanelLayout.Zone] = [.agents, .commands, .dial, .pad, .status]
+        let expectedZones: [PanelLayout.Zone] = [.agents, .commands, .status]
         var runs: [PanelLayout.Zone] = []
         for target in order where runs.last != target.zone { runs.append(target.zone) }
         check("zone runs are \(runs.map(\.rawValue)), expected \(expectedZones.map(\.rawValue))",
@@ -360,13 +346,8 @@ public struct FocusOrder: Sendable, Equatable {
                     failures.append("\(label): command \(slot.rawValue) focusability disagrees with CommandKeyView")
                 }
             }
-            // The joystick is one stop and is always live (its centre opens the
-            // chooser even with nothing bound), so it has no per-direction
-            // agreement to check. The overflow chip must be focusable exactly when
-            // there is something to show.
-            if focusOrder.isFocusable(.joystick) != true {
-                failures.append("\(label): the joystick should always be focusable")
-            }
+            // The encoder and joystick are gone: their cells are agent keys now, so
+            // there is no per-control agreement left to check here.
             if focusOrder.isFocusable(.overflow) != focusOrder.hasUnboundSessions {
                 failures.append("\(label): overflow focusability disagrees with whether anything is unbound")
             }

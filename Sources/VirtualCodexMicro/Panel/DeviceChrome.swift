@@ -170,7 +170,7 @@ struct DeviceChrome: View {
         /// Down the left side, where the hardware puts maker and year.
         static let left = "VIRTUAL PANEL · 2026"
         /// Down the right side, where the hardware puts its tagline.
-        static let right = "six keys, one glance"
+        static let right = "eight keys, one glance"
         /// Above the grid: which way is up when it is face-down on a desk.
         static let orientation = "↑"
         /// Below the grid.

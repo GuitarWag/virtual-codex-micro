@@ -27,8 +27,6 @@ struct PanelRootView: View {
             silhouette
             agentKeys
             commandCluster
-            dial
-            pad
             actionNote
         }
         .frame(width: layout.panelSize.width, height: layout.panelSize.height)
@@ -52,16 +50,12 @@ struct PanelRootView: View {
     /// and inert there.
     private func isFocusable(_ target: FocusOrder.Target) -> Bool {
         switch target {
-        case .agent, .dial:
+        case .agent:
             return true
         case .command(let slot):
             return CommandKeyView.isEnabled(
                 slot, capabilities: coordinator.focusedCapabilities, canSpawnSessions: true
             )
-        case .joystick:
-            // One stick, always live: its centre opens the preset chooser even
-            // with nothing bound to a direction.
-            return true
         case .overflow:
             // Not rendered any more, so never a stop.
             return false
@@ -126,28 +120,7 @@ struct PanelRootView: View {
         )
     }
 
-    private var dial: some View {
-        DialView(
-            layout: layout,
-            scale: .effort,
-            stepIndex: Binding(
-                get: { coordinator.effortStep },
-                set: { coordinator.setEffort($0) }
-            )
-        )
-        .offset(x: layout.dialFrame.minX, y: layout.dialFrame.minY)
-        .focused($focus, equals: .dial)
-    }
 
-    private var pad: some View {
-        DirectionPadView(
-            layout: layout,
-            presets: DirectionPadView.defaultPresets { _ in },
-            openChooser: {}
-        )
-        .offset(x: layout.padZone.minX, y: layout.padZone.minY)
-        .focused($focus, equals: .joystick)
-    }
 
     // The overflow chip is deliberately not shown. Its bind action was a no-op
     // closure — a button that did nothing — and now that only live sessions take a
