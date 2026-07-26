@@ -162,9 +162,6 @@ public struct SpeechCaptureMachine: Sendable {
     }
 
     public private(set) var state: SpeechCaptureState = .idle
-    /// Whether the key is still physically down. Tracked separately from `state`
-    /// because authorization can resolve after the release.
-    public private(set) var isHeld = false
 
     public init() {}
 
@@ -178,10 +175,8 @@ public struct SpeechCaptureMachine: Sendable {
     public mutating func apply(_ event: Event) -> String? {
         switch event {
         case .press(let readiness):
-            isHeld = true
             if let reason = readiness.blockingReason {
                 // Includes the on-device-unavailable case. No server fallback.
-                isHeld = false
                 state = .failed(reason: reason)
             } else if readiness.needsAuthorization {
                 state = .requestingAuthorization
@@ -191,27 +186,23 @@ public struct SpeechCaptureMachine: Sendable {
             return nil
 
         case .authorizationResolved(let readiness):
-            // Late callback after a failure or a completed capture: ignore.
+            // The only state a grant can act on. Anything else means the key was
+            // already released (`.release` drives `.requestingAuthorization` to
+            // `.idle`), the press failed, or this is a stale callback — so a late
+            // grant can never start recording with nobody holding the key.
             guard state == .requestingAuthorization else { return nil }
             if let reason = readiness.blockingReason {
-                isHeld = false
                 state = .failed(reason: reason)
             } else if readiness.needsAuthorization {
                 // Prompt dismissed without an answer. Not a denial; not a grant.
-                isHeld = false
                 state = .failed(reason: "Push to talk needs microphone and speech-recognition access. "
                     + "Hold the key again to be asked.")
-            } else if isHeld {
-                state = .recording
             } else {
-                // Released while the dialog was up. Back to idle — never left
-                // recording with nobody holding the key.
-                state = .idle
+                state = .recording
             }
             return nil
 
         case .release:
-            isHeld = false
             switch state {
             case .recording:
                 state = .transcribing
@@ -232,7 +223,6 @@ public struct SpeechCaptureMachine: Sendable {
             return trimmed.isEmpty ? nil : trimmed
 
         case .failure(let reason):
-            isHeld = false
             // A reason is mandatory; a blank failure would render an empty key.
             state = .failed(reason: reason.isEmpty ? "Speech recognition failed." : reason)
             return nil
@@ -250,8 +240,8 @@ public struct SpeechCaptureMachine: Sendable {
 public final class SpeechCapture: ObservableObject {
 
     /// Exact keys and strings `Scripts/bundle.sh` must add to Info.plist. Not
-/// read at runtime — it is the single place the strings live so the script and
-    /// this file cannot disagree silently.
+    /// read at runtime — it is the single place the strings live so the script
+    /// and this file cannot disagree silently.
     public static let requiredInfoPlistStrings: [String: String] = [
         "NSMicrophoneUsageDescription":
             "Virtual Codex Micro records your voice only while you hold the push-to-talk key, "
@@ -311,8 +301,10 @@ public final class SpeechCapture: ObservableObject {
         machine.apply(.release)
         state = machine.state
         guard wasRecording else {
-            // Released during the permission prompt, or never started.
-            stopAudio()
+            // Released during the permission prompt, or never started. A
+            // duplicate release while already transcribing must not tear down
+            // the recognition that is still flushing.
+            if state != .transcribing { stopAudio() }
             return
         }
         // Stop capturing but let the recognizer flush what it already has.
@@ -526,7 +518,6 @@ public final class SpeechCapture: ObservableObject {
                 if machine.state.failureReason != reason {
                     failures.append("\(grant) authorization did not surface its reason")
                 }
-                if machine.isHeld { failures.append("\(grant) authorization left the key held") }
                 // And no transcript can sneak out of a failed press.
                 if machine.apply(.transcript("hello")) != nil {
                     failures.append("\(grant) authorization still dispatched a prompt")
@@ -557,11 +548,13 @@ public final class SpeechCapture: ObservableObject {
               early.state == .requestingAuthorization)
         early.apply(.release)
         check("release during authorization left state \(early.state)", early.state == .idle)
-        check("release during authorization left the key held", !early.isHeld)
         early.apply(.authorizationResolved(readiness()))
         check("late grant after release started recording with nobody holding",
               early.state != .recording)
         check("late grant after release is not idle", early.state == .idle)
+        // And nothing can be dispatched out of that tail.
+        check("late grant after release dispatched a prompt",
+              early.apply(.transcript("stray words")) == nil)
 
         // Still held when the grant lands: that one does record.
         var held = SpeechCaptureMachine()

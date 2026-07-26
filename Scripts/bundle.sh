@@ -30,6 +30,14 @@ cat > "$APP/Contents/Info.plist" <<'PLIST'
   <key>LSUIElement</key><true/>
   <key>NSAppleEventsUsageDescription</key>
   <string>Virtual Codex Micro raises the terminal window that owns an agent session when you click its key.</string>
+  <!-- Both speech keys are mandatory, not optional: requesting either
+       authorization without its usage string is a hard crash on first press,
+       not a declined prompt. Kept in sync with
+       SpeechCapture.requiredInfoPlistStrings. -->
+  <key>NSMicrophoneUsageDescription</key>
+  <string>Virtual Codex Micro records your voice only while you hold the push-to-talk key, so you can dictate a prompt to an agent session.</string>
+  <key>NSSpeechRecognitionUsageDescription</key>
+  <string>Virtual Codex Micro transcribes held-key recordings on this Mac to turn them into agent prompts. Speech recognition runs on-device and audio is never sent to Apple.</string>
 </dict>
 PLIST
 echo '</plist>' >> "$APP/Contents/Info.plist"

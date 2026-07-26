@@ -58,6 +58,10 @@ enum SelfCheck {
         failures += ClaudeHookSource.selfCheckFailures().map { "hooks: \($0)" }
         failures += ActivityLog.selfCheckFailures().map { "activity: \($0)" }
         failures += DriftGuard.selfCheckFailures().map { "drift: \($0)" }
+        failures += SpeechCapture.selfCheckFailures().map { "speech: \($0)" }
+        failures += OverflowView.selfCheckFailures().map { "overflow: \($0)" }
+        failures += KeyMapStore.selfCheckFailures().map { "keymap: \($0)" }
+        failures += OnboardingView.selfCheckFailures().map { "onboarding: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

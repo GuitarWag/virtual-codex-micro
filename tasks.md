@@ -4,10 +4,6 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-017] **M1 exit review: recognisability and restraint** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-23`
-  > Review the prototype against the reference control map and against the PRD's own risk of overfitting to mimicry. Confirm someone familiar with the hardware recognises the structure immediately, that labels and hit targets survived the fidelity push, and that nothing in the visuals or copy reads as an official product. Written go/no-go before M2 starts.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-023] **Claude Code adapter: owned sessions under PTY** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-09-13`
   > Spawn and supervise sessions the app owns. The M0 spike settled the mechanism, so these are now requirements rather than choices: use forkpty, NOT openpty plus Foundation Process (Process gives no hook between fork and exec, so the pty never becomes the controlling terminal and every child is a guaranteed orphan); keep a reader draining the pty master for the life of every child or it blocks in write() and looks hung; tear down with killpg then SIGKILL on a timeout, because the pty hangup leaked once in 66 runs and never reaches SIGHUP-ignoring grandchildren like MCP servers or language servers. DECIDED: owned sessions run a VISIBLE TUI (not headless stream-json), because the PRD's non-goal is not replacing the terminal and the hook spike removed the reason injection was unsafe. Sequence: PermissionRequest hook fires at 1ms -> key amber -> user presses accept -> keystroke injected into the PTY -> PostToolUse confirms -> key returns to running. Detection comes from hooks, never from scraped text. HARD REQUIREMENT on the reject path: PermissionDenied never fired in 12 spike sessions, so there is no proven signal a rejection landed. After injecting, wait for a confirming event within a bounded window and drive the key to `unknown` if none arrives. An unconfirmed reject must NEVER be reported as done. Spawn with --settings pointing at our own hook file, which gives full hook coverage with zero writes to the user's ~/.claude/settings.json. Untested and still open: six concurrent children, sleep/wake, SIGWINCH resize, and a startup sweep for strays from a previous crash.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -16,24 +12,8 @@
   > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-029] **Overflow handling beyond six sessions** `priority:medium` `assignee:claude` `tags:m2,ui` `due:2026-09-25`
-  > Count badge for unbound sessions plus paging or a chooser, with priority given to surfacing any session in needs-input or error that has no slot. Answers the PRD open question about representing more than six agents. Silent truncation is not acceptable here: a hidden blocked agent defeats the purpose of the panel.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-030] **Permission and hook-install onboarding** `priority:medium` `assignee:claude` `tags:m2,ship` `due:2026-09-27`
-  > First-run flow that explains, before the OS prompt appears, why Automation or Accessibility access is being requested and exactly what breaks without it. Asks consent before writing hooks into ~/.claude/settings.json, shows the diff it intends to make, and offers one-click removal. Degraded modes must remain usable rather than dead-ending.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-033] **Remapping and workflow preset editor** `priority:medium` `assignee:claude` `tags:m3,config` `due:2026-10-22`
-  > Configuration surface for rebinding command keys, editing the two custom slots, and defining the four pad presets such as review PR, debug issue, explain code, write docs. Global defaults with per-project override, resolved project-first — global-only breaks for anyone with several repos, per-project-only costs too much setup to survive the activation metric. Presets are plain files, importable and diffable.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-034] **Ship: notarized build, updates, idle click-through, legal pass** `priority:medium` `assignee:claude` `tags:m4,ship` `due:2026-11-15`
   > Partly blocked on tooling: notarytool and stapler ship with Xcode, which is not installed, so notarization cannot be completed in this environment — installing Xcode is a prerequisite for this task, and Scripts/bundle.sh currently ad-hoc signs instead. Scope: notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-035] **Push-to-talk capture (deferred from v1 P1)** `priority:low` `assignee:claude` `tags:m3,backend` `due:2026-10-25`
-  > Hold-to-record prompt capture using the Speech framework with on-device recognition, microphone permission handling, and dispatch of the transcript into an owned session. Demoted from the PRD's P1 because it is a self-contained subsystem orthogonal to the core thesis, and shipping it before state is trustworthy buys nothing. Until then the push-to-talk key ships visibly disabled.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## IN PROGRESS
@@ -138,6 +118,26 @@
 
 - [x] [T-VCMPLAN1-028] **Drift guard: reconcile on wake and focus** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-24`
   > Re-verify every bound session on app foreground, display wake and system wake: is the process still alive, is the transcript still growing, did we miss events while asleep. Anything unverifiable goes to `unknown`. Directly addresses the PRD's first-named risk — a panel confidently showing a stale colour is worse than one admitting it lost track.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-017] **M1 exit review: recognisability and restraint** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-23`
+  > Review the prototype against the reference control map and against the PRD's own risk of overfitting to mimicry. Confirm someone familiar with the hardware recognises the structure immediately, that labels and hit targets survived the fidelity push, and that nothing in the visuals or copy reads as an official product. Written go/no-go before M2 starts.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-029] **Overflow handling beyond six sessions** `priority:medium` `assignee:claude` `tags:m2,ui` `due:2026-09-25`
+  > Count badge for unbound sessions plus paging or a chooser, with priority given to surfacing any session in needs-input or error that has no slot. Answers the PRD open question about representing more than six agents. Silent truncation is not acceptable here: a hidden blocked agent defeats the purpose of the panel.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-030] **Permission and hook-install onboarding** `priority:medium` `assignee:claude` `tags:m2,ship` `due:2026-09-27`
+  > First-run flow that explains, before the OS prompt appears, why Automation or Accessibility access is being requested and exactly what breaks without it. Asks consent before writing hooks into ~/.claude/settings.json, shows the diff it intends to make, and offers one-click removal. Degraded modes must remain usable rather than dead-ending.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-033] **Remapping and workflow preset editor** `priority:medium` `assignee:claude` `tags:m3,config` `due:2026-10-22`
+  > Configuration surface for rebinding command keys, editing the two custom slots, and defining the four pad presets such as review PR, debug issue, explain code, write docs. Global defaults with per-project override, resolved project-first — global-only breaks for anyone with several repos, per-project-only costs too much setup to survive the activation metric. Presets are plain files, importable and diffable.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-035] **Push-to-talk capture (deferred from v1 P1)** `priority:low` `assignee:claude` `tags:m3,backend` `due:2026-10-25`
+  > Hold-to-record prompt capture using the Speech framework with on-device recognition, microphone permission handling, and dispatch of the transcript into an owned session. Demoted from the PRD's P1 because it is a self-contained subsystem orthogonal to the core thesis, and shipping it before state is trustworthy buys nothing. Until then the push-to-talk key ships visibly disabled.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED
