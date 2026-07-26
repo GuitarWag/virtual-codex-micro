@@ -52,6 +52,14 @@ struct DeviceChrome: View {
     /// The six slot states, in key order. Short arrays are fine — missing slots
     /// simply do not vote.
     let states: [AgentState]
+    /// When set, this is the glow colour, overriding the urgency ranking below.
+    ///
+    /// The ranking answers "what is the most urgent thing anywhere", which is right
+    /// for an unattended panel but wrong once you are looking at a specific key: one
+    /// stale failure pinned the whole case red and buried every later change. The
+    /// owner passes the selected key's state, falling back to the most recent state
+    /// received, so the glow tracks what you are actually attending to.
+    var glowOverride: AgentState?
 
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
@@ -114,9 +122,20 @@ struct DeviceChrome: View {
     static func underglow(
         for states: [AgentState],
         layout: PanelLayout,
-        reduceTransparency: Bool
+        reduceTransparency: Bool,
+        glowOverride: AgentState? = nil
     ) -> Underglow? {
-        guard let state = aggregateState(states) else { return nil }
+        // An override still has to obey `underglowRank`'s rule that some states do
+        // not light the case at all. Coalescing straight into the guard treated
+        // `.unassigned` as a valid glow, so selecting an empty slot washed the case
+        // in the empty-slot colour instead of going dark. Caught by this file's own
+        // check rather than by looking at it.
+        let resolved: AgentState? = if let glowOverride {
+            underglowRank(glowOverride) == nil ? nil : glowOverride
+        } else {
+            aggregateState(states)
+        }
+        guard let state = resolved else { return nil }
         let bleed = PanelLayout.glowBleed * layout.scale
         return Underglow(
             state: state,
@@ -164,7 +183,8 @@ struct DeviceChrome: View {
 
     var body: some View {
         let glow = Self.underglow(
-            for: states, layout: layout, reduceTransparency: reduceTransparency
+            for: states, layout: layout, reduceTransparency: reduceTransparency,
+            glowOverride: glowOverride
         )
         return ZStack {
             if let glow { underglowLayers(glow) }
@@ -413,6 +433,33 @@ struct DeviceChrome: View {
     ///
     ///     failures += DeviceChrome.selfCheckFailures().map { "chrome: \($0)" }
     static func selfCheckFailures() -> [String] {
+        var overrideFailures: [String] = []
+        // The override must beat the ranking, and must beat it for EVERY state —
+        // including the ones the ranking would otherwise suppress, which is the
+        // whole point: a stale `error` used to pin the case red so no later change
+        // could be seen. Driven from allCases so a new state is covered by default.
+        let overrideFixture: [AgentState] = [.error, .needsInput, .running]
+        for forced in AgentState.allCases where underglowRank(forced) != nil {
+            let glow = underglow(for: overrideFixture, layout: .regular,
+                                 reduceTransparency: false, glowOverride: forced)
+            if glow?.state != forced {
+                overrideFailures.append(
+                    "glow override \(forced.rawValue) was ignored; got \(glow?.state.rawValue ?? "nil")"
+                )
+            }
+        }
+        // With no override the ranking still applies, or the unattended panel loses
+        // its most-urgent-wins behaviour.
+        if underglow(for: overrideFixture, layout: .regular, reduceTransparency: false)?.state != .error {
+            overrideFailures.append("without an override the ranking no longer picks the most urgent state")
+        }
+        // An override of `unassigned` must not light the case: an empty slot is not
+        // a status, and selecting one should go dark rather than glow grey.
+        if underglow(for: [.unassigned], layout: .regular,
+                     reduceTransparency: false, glowOverride: .unassigned) != nil {
+            overrideFailures.append("an unassigned override lit the case")
+        }
+
         var failures: [String] = []
         func check(_ name: String, _ condition: Bool) {
             if !condition { failures.append(name) }
@@ -528,7 +575,7 @@ struct DeviceChrome: View {
         }
         check("two plate legends are identical", Set(Legend.all).count == Legend.all.count)
 
-        return failures
+        return overrideFailures + failures
     }
 }
 

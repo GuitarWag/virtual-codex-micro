@@ -18,11 +18,14 @@ enum OffscreenRender {
 
         for (suffix, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
             let layout = PanelLayout.regular
+            let forced = ProcessInfo.processInfo.environment["VCM_GLOW"]
+                .flatMap { AgentState(rawValue: $0) }
             let view = PanelRootView(
                 coordinator: .demo(
                     states: demoStates(suffix),
                     sessions: demoSessions(suffix),
-                    capabilities: .observed   // shows the disabled command treatment
+                    capabilities: .observed,  // shows the disabled command treatment
+                    glow: forced
                 ),
                 layout: layout
             )

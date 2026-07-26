@@ -30,6 +30,7 @@ struct PanelRootView: View {
             dial
             pad
             overflowChip
+            actionNote
         }
         .frame(width: layout.panelSize.width, height: layout.panelSize.height)
         // Panel-local Tab, wrapping rather than falling out of the last zone.
@@ -162,6 +163,31 @@ struct PanelRootView: View {
         .focused($focus, equals: .overflow)
     }
 
+    /// Brief feedback for the last command, on the plate's bottom legend line so it
+    /// displaces printed text rather than covering a key. Four seconds, then gone.
+    @ViewBuilder
+    private var actionNote: some View {
+        if let note = coordinator.lastActionNote {
+            Text(note)
+                .font(.system(size: layout.fontSize(9), weight: .medium))
+                .lineLimit(1)
+                .truncationMode(.tail)
+                .foregroundStyle(.primary)
+                .padding(.horizontal, 6 * layout.scale)
+                .padding(.vertical, 2 * layout.scale)
+                .background(
+                    Capsule().fill(reduceTransparency
+                                   ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                                   : AnyShapeStyle(.regularMaterial))
+                )
+                .frame(maxWidth: layout.plateFrame.width - 24 * layout.scale)
+                .position(x: layout.plateFrame.midX,
+                          y: layout.plateFrame.maxY - 13 * layout.scale)
+                .transition(.opacity)
+                .accessibilityAddTraits(.isStaticText)
+        }
+    }
+
     /// The device itself: translucent shell, inset plate with screws and printed
     /// legends, and the state underglow bleeding past the case. The glow is the
     /// at-a-glance mechanism the reference photographs make obvious and my first
@@ -169,7 +195,8 @@ struct PanelRootView: View {
     private var silhouette: some View {
         DeviceChrome(
             layout: layout,
-            states: (0 ..< PanelLayout.agentKeyCount).map { coordinator.state(at: $0) }
+            states: (0 ..< PanelLayout.agentKeyCount).map { coordinator.state(at: $0) },
+            glowOverride: coordinator.glowState
         )
     }
 }

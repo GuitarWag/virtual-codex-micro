@@ -34,6 +34,15 @@ final class PanelCoordinator: ObservableObject {
     /// are edge-triggered with no snapshot. Neither is sufficient alone.
     private let hooks = ClaudeHookSource()
     private var transcripts = ClaudeTranscriptSource()
+
+    /// cmux-hosted sessions. Preferred over the generic paths where a session is
+    /// cmux's, because cmux can do what the terminal-scripting route cannot: focus
+    /// a named surface, and deliver an approval to that surface rather than to
+    /// whatever holds focus. Sessions it knows about are controllable, not merely
+    /// observable.
+    private let cmux = CmuxAdapter()
+    /// Session ids cmux hosts, so routing does not have to re-derive it per action.
+    private var cmuxHosted: Set<String> = []
     private var driftObserver: DriftTriggerObserver?
 
     /// The mock's own source. Long staleness threshold on purpose: the demo
@@ -49,6 +58,44 @@ final class PanelCoordinator: ObservableObject {
 
     /// Slot currently showing its detail popover, owned here so only one opens.
     @Published var detailSlot: Int?
+
+    /// The state the case should glow.
+    ///
+    /// The selected key's state, falling back to the most recently received change
+    /// when the selected slot has nothing to show. Replaces the urgency ranking for
+    /// the glow specifically: ranking is right for an unattended panel, but it meant
+    /// one stale `error` pinned the case red and every later change was invisible.
+    var glowState: AgentState? {
+        if let demoGlow { return demoGlow }
+        let selected = state(at: selectedSlot)
+        if selected != .unassigned { return selected }
+        return latestReceivedState
+    }
+
+    /// The most recent state a source actually reported, regardless of slot.
+    private(set) var latestReceivedState: AgentState?
+
+    /// The last action's outcome, for brief on-panel feedback.
+    ///
+    /// Exists because a *correct* refusal was indistinguishable from a dead button.
+    /// The adapter reads the surface before sending and declines when it cannot see
+    /// a real prompt — which is the safe behaviour — but with the outcome going only
+    /// to a log reachable through the menu bar, pressing accept with nothing pending
+    /// looked exactly like a broken key. Silence is the wrong answer for a control
+    /// surface: the whole product is about knowing what is going on at a glance.
+    @Published private(set) var lastActionNote: String?
+
+    private func note(_ text: String) {
+        lastActionNote = text
+        let token = UUID()
+        feedbackToken = token
+        Task { @MainActor in
+            try? await Task.sleep(for: .seconds(4))
+            if feedbackToken == token { lastActionNote = nil }
+        }
+    }
+
+    private var feedbackToken: UUID?
 
     /// The slot the command cluster and the dial act on.
     ///
@@ -73,6 +120,10 @@ final class PanelCoordinator: ObservableObject {
         engine.register(.claudeHooks)
         engine.register(.claudeTranscript)
         engine.register(OwnedSession.stateSource)
+        // Without this every cmux reading is rejected as an unregistered source —
+        // which the engine does deliberately and logs, but silently as far as the
+        // panel is concerned.
+        engine.register(.cmuxEvents)
         engine.register(Self.mockSource)
 
         // Strays from a previous crash, before anything else spawns.
@@ -86,12 +137,14 @@ final class PanelCoordinator: ObservableObject {
     static func demo(
         states: [Int: AgentState],
         sessions: [Int: AgentSession],
-        capabilities: SessionCapabilities = .observed
+        capabilities: SessionCapabilities = .observed,
+        glow: AgentState? = nil
     ) -> PanelCoordinator {
         let coordinator = PanelCoordinator()
         coordinator.demoStates = states
         coordinator.demoSessions = sessions
         coordinator.demoCapabilities = capabilities
+        coordinator.demoGlow = glow
         return coordinator
     }
 
@@ -100,6 +153,7 @@ final class PanelCoordinator: ObservableObject {
     private var demoStates: [Int: AgentState]?
     private var demoSessions: [Int: AgentSession] = [:]
     private var demoCapabilities: SessionCapabilities = .observed
+    private var demoGlow: AgentState?
 
     func start() {
         if ProcessInfo.processInfo.environment["VCM_COLORTEST"] != nil {
@@ -157,6 +211,7 @@ final class PanelCoordinator: ObservableObject {
         // Tailing first and on its own: at launch there are no hook events to
         // catch up on, so this is the only way six keys can mean anything before
         // the next transition happens.
+        await pollCmux()
         pollTranscripts()
         autobindFreeSlots()
         refresh(discovered: discoveredSessions)
@@ -164,6 +219,7 @@ final class PanelCoordinator: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { [weak self] in await self?.followHooks() }
             group.addTask { [weak self] in await self?.followTranscripts() }
+            group.addTask { [weak self] in await self?.followCmux() }
         }
     }
 
@@ -201,6 +257,28 @@ final class PanelCoordinator: ObservableObject {
                                      event: .note("\(event.name) ignored: \(reason)")))
         }
         refresh(discovered: discoveredSessions)
+    }
+
+    /// cmux's own view, which carries the session id directly: `surface.list`
+    /// reports each surface's UUID beside the checkpoint id, so no pid or tty join
+    /// is involved and none of that fragility applies.
+    private func pollCmux() async {
+        guard let found = try? await cmux.discoverSessions() else { return }
+        for session in found {
+            cmuxHosted.insert(session.id)
+            known[session.id] = DiscoveredSession(session: session)
+            record(session.state, for: session.id, from: .cmuxEvents)
+        }
+    }
+
+    private func followCmux() async {
+        for await updated in cmux.stateUpdates() {
+            cmuxHosted.insert(updated.id)
+            known[updated.id] = DiscoveredSession(session: updated)
+            record(updated.state, for: updated.id, from: .cmuxEvents)
+            autobindFreeSlots()
+            refresh(discovered: discoveredSessions)
+        }
     }
 
     private func pollTranscripts() {
@@ -303,6 +381,7 @@ final class PanelCoordinator: ObservableObject {
         guard case .accepted = engine.record(state, for: sessionID, from: source.id, observedAt: now)
         else { return }
         guard before != state else { return }
+        latestReceivedState = state
         log.record(ActivityEntry(
             at: now,
             slot: slot(for: sessionID),
@@ -365,7 +444,11 @@ final class PanelCoordinator: ObservableObject {
     /// which the command cluster renders differently from "bound but not allowed".
     func capabilities(at slot: Int) -> SessionCapabilities? {
         if demoStates != nil { return demoSessions[slot] == nil ? nil : demoCapabilities }
-        guard registry.binding(at: slot) != nil else { return nil }
+        guard let bound = registry.binding(at: slot) else { return nil }
+        // A cmux session is controllable, not merely observable: cmux can target a
+        // named surface, which was the whole objection to typing into a terminal we
+        // did not spawn.
+        if cmuxHosted.contains(bound.sessionID) { return CmuxAdapter.capabilities }
         return .observed
     }
 
@@ -382,6 +465,19 @@ final class PanelCoordinator: ObservableObject {
         // cannot be focused — an unfocusable session is still one you may want to
         // act on, and tier 3 is common (a bare `claude` carries no session id).
         select(slot)
+        if let bound = registry.binding(at: slot), cmuxHosted.contains(bound.sessionID) {
+            // cmux focuses the actual surface, so this is Tier 1 rather than the
+            // app-only raise the terminal-scripting path manages.
+            Task {
+                do { try await cmux.dispatch(.focus, to: bound.sessionID) }
+                catch {
+                    log.record(ActivityEntry(at: Date(), slot: slot, sessionID: bound.sessionID,
+                                             event: .note("cmux focus failed: \(error)")))
+                }
+                refresh(discovered: discoveredSessions)
+            }
+            return
+        }
         guard let binding = registry.binding(at: slot) else {
             log.record(ActivityEntry(at: Date(), slot: slot,
                                      event: .note("slot \(slot + 1) selected; nothing bound to focus")))
@@ -422,6 +518,14 @@ final class PanelCoordinator: ObservableObject {
         Task {
             let now = Date()
             do {
+                if cmuxHosted.contains(binding.sessionID) {
+                    try await cmux.dispatch(command, to: binding.sessionID)
+                    log.record(ActivityEntry(at: now, slot: target, sessionID: binding.sessionID,
+                                             event: .action(command, .sent)))
+                    note("\(slot.rawValue) sent to \(binding.title)")
+                    refresh(discovered: discoveredSessions)
+                    return
+                }
                 guard useDemoBackend else {
                     // Observed sessions cannot be typed into, and no owned session
                     // is spawned yet. Refusing loudly beats pretending: the key is
@@ -442,9 +546,23 @@ final class PanelCoordinator: ObservableObject {
                 // swallowed, which is what makes the gating verifiable end to end.
                 log.record(ActivityEntry(at: now, slot: target, sessionID: binding.sessionID,
                                          event: .action(command, .failed("\(error)"))))
+                note(Self.readable(error, slot: slot))
             }
             refresh(discovered: [])
         }
+    }
+
+    /// Turn a dispatch failure into something worth reading on a 46pt key's worth
+    /// of space. A refusal is the common case and must not read as a malfunction.
+    private static func readable(_ error: Error, slot: PanelLayout.CommandSlot) -> String {
+        let text = "\(error)"
+        if text.contains("refused") || text.contains("noPrompt") || text.contains("prompt") {
+            return "nothing waiting to \(slot.rawValue)"
+        }
+        if text.contains("notPermitted") || text.contains("capab") {
+            return "\(slot.rawValue) unavailable for this session"
+        }
+        return "\(slot.rawValue) failed"
     }
 
     /// Slots the panel can act on today. `pushToTalk` needs a transcript before it
