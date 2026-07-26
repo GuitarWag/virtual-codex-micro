@@ -58,10 +58,12 @@ struct PanelRootView: View {
             return CommandKeyView.isEnabled(
                 slot, capabilities: coordinator.focusedCapabilities, canSpawnSessions: true
             )
-        case .pad(let direction):
-            return DirectionPadView.isActionable(
-                direction, presets: DirectionPadView.defaultPresets { _ in }
-            )
+        case .joystick:
+            // One stick, always live: its centre opens the preset chooser even
+            // with nothing bound to a direction.
+            return true
+        case .overflow:
+            return !coordinator.unbound.isEmpty
         }
     }
 
@@ -143,6 +145,7 @@ struct PanelRootView: View {
             openChooser: {}
         )
         .offset(x: layout.padZone.minX, y: layout.padZone.minY)
+        .focused($focus, equals: .joystick)
     }
 
     private var overflowChip: some View {
@@ -156,18 +159,17 @@ struct PanelRootView: View {
             x: OverflowView.indicatorFrame(layout).minX,
             y: OverflowView.indicatorFrame(layout).minY
         )
+        .focused($focus, equals: .overflow)
     }
 
-    /// Device-like frame rather than window chrome, per the visual requirements.
+    /// The device itself: translucent shell, inset plate with screws and printed
+    /// legends, and the state underglow bleeding past the case. The glow is the
+    /// at-a-glance mechanism the reference photographs make obvious and my first
+    /// pass missed — a key you must look at directly is not glanceable.
     private var silhouette: some View {
-        RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
-            .fill(reduceTransparency
-                  ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
-                  : AnyShapeStyle(.ultraThinMaterial))
-            .overlay(
-                RoundedRectangle(cornerRadius: layout.cornerRadius, style: .continuous)
-                    .strokeBorder(.separator, lineWidth: reduceTransparency ? 1.5 : 0.5)
-            )
-            .frame(width: layout.panelSize.width, height: layout.panelSize.height)
+        DeviceChrome(
+            layout: layout,
+            states: (0 ..< PanelLayout.agentKeyCount).map { coordinator.state(at: $0) }
+        )
     }
 }

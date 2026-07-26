@@ -189,9 +189,19 @@ public enum DialGeometry {
 /// resets to the scale's default. Arrow keys step, Home resets.
 ///
 /// It has to read as a rotary rather than a bent slider, which is a visual claim
-/// as much as an interaction one: the knurl on the knob face turns with the
-/// value, so the control visibly rotates instead of merely sliding a dot around
-/// an arc.
+/// as much as an interaction one: the whole cap — its sliced face and its mark —
+/// turns with the value, so the control visibly rotates instead of merely
+/// sliding a dot around an arc.
+///
+/// ## Why it looks like this
+///
+/// The reference photographs in `docs/` show a short white cylindrical knob with
+/// a diagonal slice taken off the top: one solid volume, a flat angled face
+/// catching the light, a soft shadow on the plate, and no text anywhere on it.
+/// An earlier version drew a large thin outlined circle with tick marks and the
+/// current step's word printed across the middle, which at 46pt truncated to
+/// "me..." and read as a debug widget. The word lives in the tooltip and the
+/// accessibility value, which is where a 46pt knob can actually say it.
 public struct DialView: View {
 
     private let layout: PanelLayout
@@ -226,6 +236,18 @@ public struct DialView: View {
     private var knobDiameter: CGFloat { layout.dialCenterFrame.width }
     private var center: CGPoint { CGPoint(x: diameter / 2, y: diameter / 2) }
 
+    /// The drawn cap, a hair inside the cell so the drop shadow has room. The
+    /// *hit* target stays `dialFrame`, so this cannot drift from the layout.
+    private var capDiameter: CGFloat { diameter * 0.94 }
+
+    /// How far the flat face reaches down the cap, and therefore how much of the
+    /// cylinder the slice took off.
+    private var faceDepth: CGFloat { capDiameter * 0.38 }
+
+    /// Where the flat face points when the dial sits at 12 o'clock. Matches the
+    /// photographs, which show the cut face up and to the left.
+    private static let faceRestAngle: CGFloat = -35
+
     private var index: Int { DialGeometry.clamp(stepIndex, stepCount: scale.stepCount) }
     private var currentLabel: String { scale.label(at: index) }
     private var pointerAngle: CGFloat {
@@ -234,13 +256,8 @@ public struct DialView: View {
 
     public var body: some View {
         ZStack {
-            Circle().fill(reduceTransparency
-                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
-                : AnyShapeStyle(.ultraThinMaterial))
-            Circle().strokeBorder(.quaternary, lineWidth: 1)
-            notches
-            pointer
-            knob
+            cap
+            centreFace
         }
         .frame(width: diameter, height: diameter)
         .contentShape(Circle())
@@ -281,71 +298,89 @@ public struct DialView: View {
 
     // MARK: Parts
 
-    private var notches: some View {
-        ForEach(0 ..< scale.stepCount, id: \.self) { position in
-            let active = position == index
-            Capsule()
-                .fill(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-                .frame(
-                    width: max(1.5, diameter * (active ? 0.030 : 0.022)),
-                    height: diameter * (active ? 0.105 : 0.080)
-                )
-                .offset(y: -(diameter * 0.5 - diameter * 0.055 - diameter * 0.045))
-                .rotationEffect(
-                    .degrees(
-                        DialGeometry.indicatorAngle(index: position, stepCount: scale.stepCount)
-                    )
-                )
-        }
-    }
-
-    private var pointer: some View {
-        let outer = diameter * 0.5 - diameter * 0.135
-        let inner = knobDiameter * 0.5 + diameter * 0.025
-        let length = max(diameter * 0.06, outer - inner)
-        return Capsule()
-            .fill(.primary)
-            .frame(width: max(2, diameter * 0.028), height: length)
-            .offset(y: -(inner + length / 2))
-            .rotationEffect(.degrees(pointerAngle))
-            // Reduce Motion: snap. A spinning indicator is exactly the kind of
-            // motion the setting exists to suppress.
-            .animation(reduceMotion ? nil : .interpolatingSpring(stiffness: 260, damping: 20),
-                       value: index)
-    }
-
-    private var knob: some View {
+    /// The knob: a solid pale cylinder, lit from the top left, sitting on its own
+    /// shadow.
+    ///
+    /// `.white` and `.black` at low opacity are lighting, not colour: the real
+    /// knob is white in both appearances, and shading it with `.primary` would
+    /// invert the highlight in dark mode and make a lit volume read as a hole.
+    /// Nothing here is state-coloured — the hardware encoder is not either.
+    private var cap: some View {
         ZStack {
             Circle().fill(reduceTransparency
                 ? AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
                 : AnyShapeStyle(.regularMaterial))
-            Circle().strokeBorder(.quaternary, lineWidth: 1)
-            knurl
-            Text(currentLabel)
-                .font(.system(size: max(PanelLayout.minimumFontSize, knobDiameter * 0.24), weight: .semibold, design: .rounded))
-                .lineLimit(1)
-                .minimumScaleFactor(0.55)
-                .foregroundStyle(.primary)
-                .padding(.horizontal, knobDiameter * 0.14)
+            Circle().fill(
+                LinearGradient(
+                    colors: [.white.opacity(0.5), .white.opacity(0.08), .black.opacity(0.10)],
+                    startPoint: .topLeading,
+                    endPoint: .bottomTrailing
+                )
+            )
+            slicedFace
+            Circle().strokeBorder(.black.opacity(0.18), lineWidth: max(0.8, capDiameter * 0.018))
         }
-        .frame(width: knobDiameter, height: knobDiameter)
-        .contentShape(Circle())
-        .gesture(horizontalDrag)
+        .frame(width: capDiameter, height: capDiameter)
+        .shadow(color: .black.opacity(0.24), radius: capDiameter * 0.07,
+                x: 0, y: capDiameter * 0.05)
     }
 
-    /// Turns with the value. This is the difference between a rotary and a dot
-    /// travelling along an arc.
-    private var knurl: some View {
-        ForEach(0 ..< 24, id: \.self) { mark in
-            Capsule()
-                .fill(.quaternary)
-                .frame(width: max(1, knobDiameter * 0.035), height: knobDiameter * 0.10)
-                .offset(y: -(knobDiameter * 0.5 - knobDiameter * 0.06))
-                .rotationEffect(.degrees(Double(mark) * 15))
+    /// The diagonal cut: the circular segment on one side of a chord, shaded a
+    /// step darker than the crown, with the cut edge drawn crisply. The edge is
+    /// what makes it read as a flat face rather than a smudge of shadow.
+    ///
+    /// Turns with the value — the flat side of a physical encoder is its position
+    /// readout, which is why the mark below rides in the same rotating group.
+    private var slicedFace: some View {
+        // Half the chord, from the right triangle on the radius: the chord sits
+        // `radius - faceDepth` from the centre.
+        let radius = capDiameter / 2
+        let offsetFromCentre = radius - faceDepth
+        let chordWidth = 2 * (radius * radius - offsetFromCentre * offsetFromCentre).squareRoot()
+
+        return ZStack {
+            Circle()
+                .fill(
+                    LinearGradient(
+                        colors: [.black.opacity(0.26), .black.opacity(0.07)],
+                        startPoint: .top,
+                        endPoint: .bottom
+                    )
+                )
+                .frame(width: capDiameter, height: capDiameter)
+                .mask(alignment: .top) { Rectangle().frame(height: faceDepth) }
+            Rectangle()
+                .fill(.black.opacity(0.34))
+                .frame(width: chordWidth, height: max(0.8, capDiameter * 0.022))
+                .offset(y: -radius + faceDepth)
+            mark
         }
-        .rotationEffect(.degrees(pointerAngle))
+        .frame(width: capDiameter, height: capDiameter)
+        .rotationEffect(.degrees(Self.faceRestAngle + pointerAngle))
+        // Reduce Motion: snap. A spinning knob is exactly the kind of motion the
+        // setting exists to suppress.
         .animation(reduceMotion ? nil : .interpolatingSpring(stiffness: 260, damping: 20),
                    value: index)
+    }
+
+    /// Position mark, on the crown opposite the cut so it stays on the lit face.
+    private var mark: some View {
+        Capsule()
+            .fill(.black.opacity(0.40))
+            .frame(width: max(1.5, capDiameter * 0.055), height: capDiameter * 0.13)
+            .offset(y: capDiameter * 0.5 - capDiameter * 0.14)
+    }
+
+    /// The reset / sideways-drag region. Its size is `dialCenterFrame`, which
+    /// `PanelLayout` publishes as a nested hit target — not ours to choose. Drawn
+    /// as nothing: the reference knob has no inner disc, and the cap is one
+    /// volume, not two stacked controls.
+    private var centreFace: some View {
+        Circle()
+            .fill(.clear)
+            .frame(width: knobDiameter, height: knobDiameter)
+            .contentShape(Circle())
+            .gesture(horizontalDrag)
     }
 
     // MARK: Input

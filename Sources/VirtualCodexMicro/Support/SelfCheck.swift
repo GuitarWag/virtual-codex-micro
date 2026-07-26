@@ -63,6 +63,7 @@ enum SelfCheck {
         failures += KeyMapStore.selfCheckFailures().map { "keymap: \($0)" }
         failures += OnboardingView.selfCheckFailures().map { "onboarding: \($0)" }
         failures += OwnedSession.selfCheckFailures().map { "owned: \($0)" }
+        failures += DeviceChrome.selfCheckFailures().map { "chrome: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

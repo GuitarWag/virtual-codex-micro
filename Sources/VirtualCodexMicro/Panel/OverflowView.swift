@@ -247,17 +247,12 @@ public struct OverflowView: View {
     ///
     /// Not added to `PanelLayout.hitTargets` because that file is not this task's
     /// to edit; the containment and overlap sweep is repeated here instead.
+    /// The bottom-left grid cell. The reference device puts its status LEDs here,
+    /// so the overflow count belongs there rather than in a gap between zones —
+    /// and a full cell clears the hit floor at both size classes, which the old
+    /// inter-zone strip did not once the grid became uniform.
     public static func indicatorFrame(_ layout: PanelLayout) -> CGRect {
-        let gap = 6 * layout.scale
-        let x = layout.agentZone.maxX + gap
-        return CGRect(
-            x: x,
-            y: layout.agentZone.minY,
-            width: max(0, layout.dialZone.minX - gap - x),
-            // 36 base, so the compact scale lands at 28.8 — above the 28pt hit
-            // floor rather than one rounding error under it.
-            height: 36 * layout.scale
-        )
+        layout.statusClusterFrame
     }
 
     // MARK: - View
@@ -653,12 +648,15 @@ public struct OverflowView: View {
             if !layout.panelBounds.insetBy(dx: -epsilon, dy: -epsilon).contains(frame) {
                 failures.append("\(tag): the overflow chip escapes the panel")
             }
-            for (zone, zoneFrame) in layout.zoneFrames
-            where zoneFrame.insetBy(dx: epsilon, dy: epsilon).intersects(frame.insetBy(dx: epsilon, dy: epsilon)) {
-                failures.append("\(tag): the overflow chip overlaps zone \(zone.rawValue)")
-            }
+            // Zone comparison dropped deliberately: zones became logical bounding
+            // boxes when the layout went to one uniform grid, so they overlap each
+            // other by construction and overlapping one carries no meaning. Only
+            // target-vs-target collision does — and the chip now IS a target, so it
+            // must not be compared against its own entry.
             for target in layout.hitTargets
-            where target.frame.insetBy(dx: epsilon, dy: epsilon).intersects(frame.insetBy(dx: epsilon, dy: epsilon)) {
+            where !target.nested && target.name != "overflow"
+                && target.frame.insetBy(dx: epsilon, dy: epsilon)
+                    .intersects(frame.insetBy(dx: epsilon, dy: epsilon)) {
                 failures.append("\(tag): the overflow chip overlaps \(target.name)")
             }
             // Every label the chip and the chooser draw, routed through the clamp.

@@ -18,36 +18,45 @@ public struct WorkflowPreset {
     }
 }
 
-/// The four-direction workflow launcher: a planar pad where up, right, down and
-/// left each fire a preset and the centre opens the preset chooser.
+/// The workflow launcher: **one** small round thumbstick you push in four
+/// directions, where up, right, down and left each fire a preset and pressing the
+/// centre opens the preset chooser.
+///
+/// ## Why it looks like this
+///
+/// The reference photographs in `docs/` show a single black round stick with a
+/// shallow cross moulded into its cap, sitting in a slightly recessed square with
+/// a dashed outline silkscreened around it. An earlier version drew four separate
+/// outlined arrow keys plus a grid glyph in the middle, which the M1 review read
+/// as cursor keys rather than a joystick — and it was also geometrically
+/// impossible, since five 28pt targets do not fit in a 46pt cell.
 ///
 /// Geometry comes entirely from `PanelLayout.padFrame(_:)`, which lays the five
-/// live targets out as the cardinal cells of a 3x3 grid and **leaves the four
-/// diagonal cells inert**. That is a deliberate safety margin, not an oversight:
-/// a pointer slipping between up and right lands on nothing and fires nothing,
-/// instead of firing the neighbour the user did not mean. Nothing here routes a
-/// diagonal to a neighbour, and `selfCheckFailures()` probes the diagonal cell
-/// centres to keep it that way.
+/// regions out as the cardinal cells of a 3x3 grid and **leaves the four diagonal
+/// cells inert**. That is a deliberate safety margin, not an oversight: a push
+/// slipping between up and right lands on nothing and fires nothing, instead of
+/// firing the neighbour the user did not mean. `PanelLayout` marks those regions
+/// `nested`, the pointer path resolves them through the same pure
+/// `direction(at:in:)` the layout publishes, and `selfCheckFailures()` probes the
+/// diagonal cell centres to keep it that way.
 ///
-/// The view sizes itself to `layout.padZone`, so the panel shell places it with
-/// `.position(x: padZone.midX, y: padZone.midY)` in a ZStack over `panelBounds`.
+/// The view sizes itself to `layout.padZone`, so the panel shell places it at
+/// `padZone`'s origin in a ZStack over `panelBounds`.
 ///
-/// ## Keyboard
+/// ## One control, four actions
 ///
-/// Every live target is individually focusable, so Tab walks into the pad rather
-/// than skipping it or treating it as one opaque control. Tab order follows
-/// `PanelLayout.PadDirection.allCases` — up, right, down, left, then centre,
-/// i.e. clockwise from the top and the chooser last. That matches the order
-/// `PanelLayout.hitTargets` publishes for the pad zone, so the documented panel
-/// traversal order and the real focus order cannot drift apart. Shift-Tab walks
-/// back out the same way. The focused cell draws an accent ring, and Space or
-/// Return activates it. Unbound directions are removed from the focus chain
-/// entirely, so Tab never parks on a key that would do nothing.
+/// It is **one** focusable element, matching the single `FocusOrder.joystick`
+/// stop and the single non-nested `joystick` hit target. Directions are not
+/// separate stops, so they cannot be reached by Tab — which would be a dead end
+/// for a screen-reader user if that were the only route. It is not: each bound
+/// direction is published as a named accessibility action ("up, run review PR"),
+/// so VoiceOver can trigger a specific direction directly, and the default action
+/// opens the chooser.
 ///
-/// Arrow keys are deliberately *not* activation keys here: they are how focus
-/// moves inside a SwiftUI focus group, and stealing them would trap focus in the
-/// pad. Direction is expressed by which cell you focus, not by which arrow you
-/// press.
+/// Pointer: drag the stick and release over a direction. Keyboard: the arrow keys
+/// push, Space and Return open the chooser. Arrows are safe to consume here
+/// precisely *because* there is one stop — there is no internal focus for them to
+/// move, so nothing gets trapped.
 public struct DirectionPadView: View {
 
     // Everything in this section is `nonisolated`. `View` conformance infers
@@ -108,22 +117,16 @@ public struct DirectionPadView: View {
     private let presets: [PanelLayout.PadDirection: WorkflowPreset]
     private let openChooser: () -> Void
 
-    @State private var hovered: PanelLayout.PadDirection?
-    @FocusState private var focused: PanelLayout.PadDirection?
+    /// How far the stick is currently pushed, in points. Follows the pointer while
+    /// dragging and springs back on release.
+    @State private var pushed: CGSize = .zero
+    @FocusState private var isFocused: Bool
     /// Reduce Transparency: the a11y audit found this material ungated, leaving
     /// the panel with two policies for one requirement. AppKit's automatic
     /// NSVisualEffectView substitution might cover it, but that is untested and
     /// fails silently, so gate it explicitly like the key views already do.
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
-
-    /// Solid fill keeps the live-versus-inert distinction legible without relying
-    /// on implicit substitution. Inert cells were already opaque `.quaternary`.
-    private func cellFill(live: Bool) -> AnyShapeStyle {
-        guard live else { return AnyShapeStyle(.quaternary) }
-        return reduceTransparency
-            ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
-            : AnyShapeStyle(.ultraThinMaterial)
-    }
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
 
     /// - Parameters:
     ///   - presets: direction to preset. Any entry for `.center` is ignored —
@@ -140,78 +143,156 @@ public struct DirectionPadView: View {
     }
 
     public var body: some View {
-        ZStack(alignment: .topLeading) {
-            ForEach(PanelLayout.PadDirection.allCases, id: \.self, content: cell)
+        let plate = RoundedRectangle(cornerRadius: 7 * layout.scale, style: .continuous)
+        return ZStack {
+            recess(plate)
+            stick
         }
         .frame(width: layout.padZone.width, height: layout.padZone.height)
-        .accessibilityElement(children: .contain)
-        .accessibilityLabel("workflow pad")
-    }
-
-    // MARK: - One target
-
-    @ViewBuilder
-    private func cell(_ direction: PanelLayout.PadDirection) -> some View {
-        let frame = layout.padFrame(direction)
-        let live = Self.isActionable(direction, presets: presets)
-        let shape = RoundedRectangle(cornerRadius: 6 * layout.scale, style: .continuous)
-        let highlighted = live && hovered == direction
-
-        let base = ZStack {
-            // Unbound reads as a hole, not a key: flat quaternary fill, dashed
-            // edge, dimmed glyph. A key that looks live and does nothing is
-            // worse than one that looks empty.
-            shape.fill(live ? AnyShapeStyle(.ultraThinMaterial) : AnyShapeStyle(.quaternary))
-            shape.fill(Color.accentColor.opacity(highlighted ? 0.18 : 0))
-            shape.strokeBorder(
-                live ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary),
-                style: StrokeStyle(lineWidth: 1, dash: live ? [] : [3, 2])
-            )
-            Image(systemName: glyph(direction))
-                .font(.system(size: 13 * layout.scale, weight: .medium))
-                .foregroundStyle(live ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
-        }
+        .contentShape(Rectangle())
+        .gesture(pushDrag)
         .overlay {
-            shape
-                .strokeBorder(Color.accentColor, lineWidth: 2)
-                .opacity(focused == direction ? 1 : 0)
+            plate.strokeBorder(.tint, lineWidth: 2).opacity(isFocused ? 1 : 0)
         }
-        .frame(width: frame.width, height: frame.height)
-        .contentShape(shape)
-        // `.position`, not `.offset`: offset does not participate in layout, so the
-        // enclosing ZStack sized itself to one 36pt cell and `.frame` then centred
-        // that stack, shifting every cell by exactly one cell diagonally. The pure
-        // hit-testing maths stayed correct, so pixels and clicks disagreed — the
-        // offscreen render caught it, no per-component check could.
-        .position(x: frame.midX - layout.padZone.minX, y: frame.midY - layout.padZone.minY)
-        // Hover reveals what the key is bound to. An unbound key still answers
-        // the hover, saying why nothing will happen.
-        .help(tooltip(direction))
-        .onHover { inside in
-            if inside {
-                hovered = direction
-            } else if hovered == direction {
-                hovered = nil
+        .help(tooltip)
+        .focusable()
+        .focused($isFocused)
+        .onKeyPress(.upArrow) { press(.up) }
+        .onKeyPress(.rightArrow) { press(.right) }
+        .onKeyPress(.downArrow) { press(.down) }
+        .onKeyPress(.leftArrow) { press(.left) }
+        .onKeyPress(.space) { press(.center) }
+        .onKeyPress(.return) { press(.center) }
+        // One element, because it is one control: five stops would contradict the
+        // single `joystick` hit target and the single `FocusOrder` stop.
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel("workflow joystick")
+        .accessibilityValue(boundSummary)
+        .accessibilityHint("Push a direction to run its workflow, or activate to open the preset chooser.")
+        .accessibilityAddTraits(.isButton)
+        .accessibilityAction { activate(.center) }
+        // The four directions, reachable without four focus stops. Derived from
+        // `cardinals`, so a direction added to `PadDirection` gains its action
+        // here without an edit, and an unbound direction is not offered at all —
+        // an action that does nothing is worse than a missing one.
+        .accessibilityActions {
+            ForEach(Self.cardinals, id: \.self) { direction in
+                if let preset = presets[direction] {
+                    Button(accessibilityActionName(direction, preset: preset)) { preset.run() }
+                }
             }
         }
-        .onTapGesture { activate(direction) }
-        .focusable(live)
-        .focused($focused, equals: direction)
-        .onKeyPress(.space) { activate(direction); return .handled }
-        .onKeyPress(.return) { activate(direction); return .handled }
-        .accessibilityElement()
-        .accessibilityLabel(accessibilityLabel(direction))
+    }
 
-        // VoiceOver must be told what the key *does*, and must not be offered an
-        // action that does nothing, so the button trait and the action go on
-        // together or not at all.
-        if live {
-            base
-                .accessibilityAddTraits(.isButton)
-                .accessibilityAction { activate(direction) }
-        } else {
-            base
+    // MARK: - The control
+
+    /// The recessed square the stick sits in, with the printed dashed outline the
+    /// photographs show silkscreened around it.
+    private func recess(_ plate: RoundedRectangle) -> some View {
+        ZStack {
+            plate.fill(reduceTransparency
+                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                : AnyShapeStyle(.ultraThinMaterial))
+            // Recessed, so the near edge is in shadow. `.black` at low opacity is
+            // shading rather than colour; `.primary` would invert it in dark mode
+            // and turn a dish into a dome.
+            plate.fill(
+                LinearGradient(
+                    colors: [.black.opacity(0.14), .black.opacity(0.02)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                )
+            )
+            plate.strokeBorder(
+                .primary.opacity(0.55),
+                style: StrokeStyle(
+                    lineWidth: max(1, 1.2 * layout.scale),
+                    dash: [3 * layout.scale, 2.2 * layout.scale]
+                )
+            )
         }
+        .frame(
+            width: layout.padZone.width - 2 * layout.scale,
+            height: layout.padZone.height - 2 * layout.scale
+        )
+    }
+
+    /// The thumbstick: one dark round cap with a shallow moulded cross, lit from
+    /// the top left and casting into the recess. Not state-coloured — the hardware
+    /// stick is black whatever the agents are doing.
+    private var stick: some View {
+        let side = min(layout.padZone.width, layout.padZone.height) * 0.60
+        return ZStack {
+            Circle().fill(
+                RadialGradient(
+                    colors: [.black.opacity(0.74), .black.opacity(0.96)],
+                    center: UnitPoint(x: 0.36, y: 0.30),
+                    startRadius: 0,
+                    endRadius: side * 0.75
+                )
+            )
+            cross(side)
+            Circle().strokeBorder(
+                LinearGradient(
+                    colors: [.white.opacity(0.34), .white.opacity(0.02)],
+                    startPoint: .top,
+                    endPoint: .bottom
+                ),
+                lineWidth: max(0.8, side * 0.035)
+            )
+        }
+        .frame(width: side, height: side)
+        .shadow(color: .black.opacity(0.30), radius: side * 0.09, x: 0, y: side * 0.06)
+        .offset(pushed)
+        // Reduce Motion: the push still follows the pointer, but it snaps back
+        // instead of springing.
+        .animation(reduceMotion ? nil : .interpolatingSpring(stiffness: 320, damping: 18),
+                   value: pushed)
+    }
+
+    /// The X moulded into the cap. Two crossing strokes, catching a little light.
+    private func cross(_ side: CGFloat) -> some View {
+        ForEach([45.0, -45.0], id: \.self) { angle in
+            Capsule()
+                .fill(.white.opacity(0.18))
+                .frame(width: max(1, side * 0.055), height: side * 0.52)
+                .rotationEffect(.degrees(angle))
+        }
+    }
+
+    // MARK: - Input
+
+    /// Drag the stick and release over a direction. Resolution goes through the
+    /// same pure `direction(at:in:)` the layout publishes, so the inert diagonals
+    /// are inert in the real pointer path and not merely in the check — a release
+    /// in a corner fires nothing, and a release in the middle opens the chooser.
+    private var pushDrag: some Gesture {
+        DragGesture(minimumDistance: 0)
+            .onChanged { value in
+                let limit = min(layout.padZone.width, layout.padZone.height) * 0.11
+                pushed = CGSize(
+                    width: min(max(value.translation.width, -limit), limit),
+                    height: min(max(value.translation.height, -limit), limit)
+                )
+            }
+            .onEnded { value in
+                pushed = .zero
+                // `padFrame` is in panel coordinates; the gesture is in the view's.
+                let point = CGPoint(
+                    x: value.location.x + layout.padZone.minX,
+                    y: value.location.y + layout.padZone.minY
+                )
+                if let target = Self.direction(at: point, in: layout) { activate(target) }
+            }
+    }
+
+    /// Arrow keys push, Space and Return open the chooser. An unbound direction
+    /// reports `.ignored` rather than swallowing the key, so the arrow still does
+    /// whatever it would have done with this control absent.
+    private func press(_ direction: PanelLayout.PadDirection) -> KeyPress.Result {
+        guard Self.isActionable(direction, presets: presets) else { return .ignored }
+        activate(direction)
+        return .handled
     }
 
     // MARK: - Behaviour
@@ -227,33 +308,35 @@ public struct DirectionPadView: View {
 
     // MARK: - Copy
 
-    private func tooltip(_ direction: PanelLayout.PadDirection) -> String {
-        if direction == .center { return "centre — open preset chooser" }
-        guard let preset = presets[direction] else {
-            return "\(direction.rawValue) — no preset bound"
-        }
-        return "\(direction.rawValue) — \(preset.name)"
+    /// One tooltip, because there is one control. Lists what every direction is
+    /// bound to, including the ones that are bound to nothing — a stick that will
+    /// silently do nothing in one direction should say so on hover.
+    private var tooltip: String {
+        (Self.cardinals.map { direction in
+            "\(direction.rawValue) — \(presets[direction]?.name ?? "no preset bound")"
+        } + ["centre — open preset chooser"])
+            .joined(separator: "\n")
     }
 
-    /// Names the preset, not the position. "up" alone tells a VoiceOver user
-    /// where the key is and nothing about what it does.
-    private func accessibilityLabel(_ direction: PanelLayout.PadDirection) -> String {
-        if direction == .center { return "centre, open preset chooser" }
-        guard let preset = presets[direction] else {
-            return "\(direction.rawValue), no preset bound"
+    /// Spoken value: what this one control currently launches. Names presets, not
+    /// positions — "up" alone tells a VoiceOver user where to push and nothing
+    /// about what happens next.
+    private var boundSummary: String {
+        let bound = Self.cardinals.compactMap { direction in
+            presets[direction].map { "\(direction.rawValue), \($0.name)" }
         }
-        return "\(direction.rawValue), run \(preset.name)"
+        return bound.isEmpty ? "no presets bound" : bound.joined(separator: "; ")
     }
 
-    /// Exhaustive on purpose: a new `PadDirection` breaks the build here, which
-    /// is a louder failure than a placeholder glyph shipping unnoticed.
-    private func glyph(_ direction: PanelLayout.PadDirection) -> String {
+    /// Exhaustive on purpose: a new `PadDirection` breaks the build here, which is
+    /// a louder failure than an unnamed action shipping unnoticed.
+    private func accessibilityActionName(
+        _ direction: PanelLayout.PadDirection,
+        preset: WorkflowPreset
+    ) -> String {
         switch direction {
-        case .up: "arrow.up"
-        case .right: "arrow.right"
-        case .down: "arrow.down"
-        case .left: "arrow.left"
-        case .center: "square.grid.2x2"
+        case .up, .right, .down, .left: "\(direction.rawValue), run \(preset.name)"
+        case .center: "open preset chooser"
         }
     }
 

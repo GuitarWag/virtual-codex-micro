@@ -2,9 +2,11 @@ import AppKit
 import SwiftUI
 
 /// The six fixed-purpose command keys: the quieter cluster next to the agent
-/// keys. Icon plus short text label, no state glow, and a fill intensity well
-/// below an agent key's — the agent keys carry the at-a-glance proposition and
-/// must stay the brightest things on the panel.
+/// keys. One thin line icon on an opaque near-white cap, no caption and no state
+/// glow — the agent keys carry the at-a-glance proposition and stay the only
+/// coloured, lit things on the panel. That division is the reference device's,
+/// not a preference: its command caps are solid white plastic and only the agent
+/// caps are translucent and backlit.
 ///
 /// Disabled is a first-class visual state here rather than an afterthought.
 /// Per PLAN.md's owned-vs-observed correction: a `claude` session the user
@@ -116,21 +118,12 @@ public struct CommandKeyView: View {
 
     // MARK: - Slot presentation
 
-    /// Text on the key. Short because the cap is 40pt at regular size, but never
-    /// absent: an icon-only key is a guessing game for anyone who does not
-    /// already know the cluster, and the spoken name lives in `actionName`.
-    public static func keyLabel(for slot: PanelLayout.CommandSlot) -> String {
-        switch slot {
-        case .accept: "accept"
-        case .reject: "reject"
-        case .newSession: "new"
-        case .pushToTalk: "talk"
-        case .custom1: "c1"
-        case .custom2: "c2"
-        }
-    }
-
-    /// Spoken and hover name. Full words, unlike the cap.
+    /// Spoken and hover name. The only place these keys carry words: the
+    /// reference caps are bare white plastic with one thin line icon and no
+    /// legend, so `actionName` reaches the user through the tooltip and
+    /// VoiceOver instead of through 8pt type on a 46pt cap. There used to be a
+    /// `keyLabel` returning "c1"/"talk" for the face; a two-character caption is
+    /// not the thing that rescues an unlabelled key anyway — the hover text is.
     public static func actionName(for slot: PanelLayout.CommandSlot) -> String {
         switch slot {
         case .accept: "Accept"
@@ -142,17 +135,29 @@ public struct CommandKeyView: View {
         }
     }
 
-    /// All six are SF Symbols 1.0 names, so they exist on every macOS the
-    /// package supports (deployment target is macOS 14). `selfCheckFailures()`
-    /// resolves each one through `NSImage` rather than trusting this comment.
+    /// The icons the hardware actually has, read off the top-down reference: a
+    /// lightning bolt, a check in a circle, an X in a circle, a diverging arrow,
+    /// a microphone, and a small rounded-hexagon face. The numbered circles that
+    /// used to stand in for the bolt and the face were placeholders.
+    ///
+    /// `face.smiling` is the nearest available match rather than a real one — SF
+    /// Symbols has no hexagonal face, so this trades the silhouette for the
+    /// meaning. `mic` and `bolt` are the bare glyphs, not the `.circle` variants,
+    /// because the reference draws them unenclosed while accept and reject are
+    /// genuinely ringed; that difference is a real distinction on the cap and
+    /// worth keeping.
+    ///
+    /// `selfCheckFailures()` resolves each name through `NSImage` rather than
+    /// trusting this comment — the deployment target is macOS 14 and a symbol
+    /// that arrived later would silently draw nothing.
     public static func iconName(for slot: PanelLayout.CommandSlot) -> String {
         switch slot {
         case .accept: "checkmark.circle"
         case .reject: "xmark.circle"
-        case .newSession: "plus.circle"
-        case .pushToTalk: "mic.circle"
-        case .custom1: "1.circle"
-        case .custom2: "2.circle"
+        case .newSession: "arrow.triangle.branch"
+        case .pushToTalk: "mic"
+        case .custom1: "bolt"
+        case .custom2: "face.smiling"
         }
     }
 
@@ -170,6 +175,8 @@ public struct CommandKeyView: View {
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.colorSchemeContrast) private var colorSchemeContrast
 
     @State private var isHovering = false
 
@@ -231,55 +238,105 @@ public struct CommandKeyView: View {
         .onHover { hovering in isHovering = hovering && enabled }
     }
 
+    /// One thin line icon on an opaque cap. No caption: the reference caps carry
+    /// nothing but the icon, and the words live in the tooltip and the VoiceOver
+    /// label, which is where a disabled key's *reason* already lived.
     private func face(enabled: Bool, size: CGSize) -> some View {
         let shape = RoundedRectangle(cornerRadius: layout.commandKeyCornerRadius, style: .continuous)
         let isFocused = focusedSlot == slot
+        let lit = enabled && !reduceTransparency
 
-        return VStack(spacing: 1 * layout.scale) {
-            Image(systemName: Self.iconName(for: slot))
-                .font(.system(size: layout.fontSize(14), weight: .regular))
-            Text(Self.keyLabel(for: slot))
-                .font(.system(size: layout.fontSize(8), weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.75)
-        }
-        // Only `.unassigned` of the seven palettes is specified as unlit and
-        // recessed, which is what this cluster wants: measured-legible label on
-        // a face that reads quieter than any live agent key.
-        .foregroundStyle(StateColors.keyLabel(.unassigned).opacity(enabled ? 1 : 0.55))
-        .frame(width: size.width, height: size.height)
-        .background(shape.fill(StateColors.keyFill(.unassigned).opacity(fillOpacity(enabled: enabled))))
-        .overlay(edge(shape, enabled: enabled))
-        .overlay {
-            if isFocused {
-                shape.inset(by: -2 * layout.scale)
-                    .strokeBorder(Color.accentColor, lineWidth: 2 * layout.scale)
+        return Image(systemName: Self.iconName(for: slot))
+            .font(.system(size: layout.fontSize(15), weight: .regular))
+            // Only `.unassigned` of the seven palettes is specified as unlit and
+            // recessed, which is what this cluster wants: measured-legible icon
+            // on a face that reads quieter than any live agent key.
+            .foregroundStyle(StateColors.keyLabel(.unassigned).opacity(enabled ? 0.9 : 0.42))
+            .frame(width: size.width, height: size.height)
+            .background {
+                ZStack {
+                    shape.fill(capBody(enabled: enabled))
+                    if lit { shape.fill(gloss) }
+                }
             }
+            .overlay(edge(shape, enabled: enabled))
+            .overlay {
+                if isFocused {
+                    shape.inset(by: -2 * layout.scale)
+                        .strokeBorder(Color.accentColor, lineWidth: 2 * layout.scale)
+                }
+            }
+            // Unlit caps cast no shadow, which is most of why they read as
+            // pressed into the plate rather than sitting on it.
+            .background { if lit { plateShadow(shape) } }
+            .contentShape(shape)
+            // Reduce Motion: the hover change still happens, it just arrives
+            // instantly instead of easing.
+            .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovering)
+    }
+
+    /// Bright white plastic, opaque. The reference command caps are the
+    /// brightest thing on the device — brighter than the plate they sit on — and
+    /// nothing in `StateColors` is white, because no *state* is white. So this
+    /// one value is achromatic and local: hue stays the palette's monopoly.
+    ///
+    /// Only in the plain light appearance. On a dark panel a white cap glares,
+    /// and under Increase Contrast the plate is pure white so a white cap would
+    /// dissolve into it. Both fall back to `.unassigned`'s measured fill at full
+    /// opacity, which is exactly where the icon's 4.5:1 was measured.
+    ///
+    /// Disabled drops to a translucent fill instead: the cap stops being a cap.
+    private func capBody(enabled: Bool) -> Color {
+        guard enabled else {
+            return StateColors.keyFill(.unassigned).opacity(reduceTransparency ? 1 : 0.42)
         }
-        .contentShape(shape)
-        // Reduce Motion: the hover change still happens, it just arrives
-        // instantly instead of easing.
-        .animation(reduceMotion ? nil : .easeOut(duration: 0.12), value: isHovering)
+        if usesWhiteCap { return .white }
+        return StateColors.keyFill(.unassigned)
     }
 
-    /// Enabled keys sit below every lit agent-key opacity (0.85 and up) so the
-    /// cluster stays secondary. Reduce Transparency forces an opaque face —
-    /// `.unassigned` clears 4.5:1 against its own undiluted fill in all four
-    /// appearances, so going opaque costs no legibility.
-    private func fillOpacity(enabled: Bool) -> Double {
-        if reduceTransparency { return 1 }
-        if !enabled { return 0.30 }
-        return isHovering ? 0.62 : 0.50
+    private var usesWhiteCap: Bool {
+        colorScheme == .light && colorSchemeContrast != .increased
     }
 
-    /// Disabled keys get a dashed border. It survives greyscale, colour-blind
-    /// vision and Increase Contrast, where a lower opacity alone might not, and
-    /// it does not need a colour of its own.
+    /// The slight gloss of a moulded cap: nothing at the top face, shading down
+    /// the lower bevel. Achromatic, and weak enough that the centre of the cap —
+    /// where the icon sits — is left where `StateColors` measured it. Hover
+    /// lifts the sheen a little; it is the only thing hover changes.
+    private var gloss: LinearGradient {
+        LinearGradient(
+            stops: [
+                .init(color: .white.opacity(isHovering ? 0.34 : 0.22), location: 0),
+                .init(color: .clear, location: 0.45),
+                .init(color: .black.opacity(0.04), location: 0.7),
+                .init(color: .black.opacity(0.13), location: 1),
+            ],
+            startPoint: .top,
+            endPoint: .bottom
+        )
+    }
+
+    /// Where the cap meets the plate. Its own blurred shape behind the key, not
+    /// a `.shadow` on the fill, so a translucent disabled fill can never end up
+    /// showing its own shadow through its face.
+    private func plateShadow(_ shape: RoundedRectangle) -> some View {
+        shape
+            .fill(.black.opacity(0.22))
+            .blur(radius: 4 * layout.scale)
+            .offset(y: 2.5 * layout.scale)
+            .allowsHitTesting(false)
+    }
+
+    /// A solid hairline, enabled or not. The dashed border this replaced said
+    /// "unfinished" far louder than it said "unavailable" — the honest signals
+    /// for a dead key are the ones the hardware would give: no gloss, no
+    /// shadow, a face sunk into the plate and a faded icon. Those survive
+    /// greyscale and colour-blind vision without borrowing a placeholder motif,
+    /// and the reason itself is still one hover or one VoiceOver stop away.
     private func edge(_ shape: RoundedRectangle, enabled: Bool) -> some View {
         let width = (reduceTransparency ? 1.5 : 0.75) * layout.scale
         return shape.strokeBorder(
-            StateColors.keyEdge(.unassigned).opacity(enabled ? 0.55 : 0.40),
-            style: StrokeStyle(lineWidth: width, dash: enabled ? [] : [3 * layout.scale, 2 * layout.scale])
+            StateColors.keyEdge(.unassigned).opacity(enabled ? 0.45 : 0.28),
+            lineWidth: width
         )
     }
 
@@ -294,7 +351,8 @@ public struct CommandKeyView: View {
         // blank key with no capability gate.
         for slot in slots {
             let tag = slot.rawValue
-            if keyLabel(for: slot).isEmpty { failures.append("\(tag) has no key label") }
+            // The cap has no text on it, so the spoken name is the only name
+            // there is. It cannot be empty.
             if actionName(for: slot).isEmpty { failures.append("\(tag) has no spoken action name") }
 
             let icon = iconName(for: slot)
@@ -310,6 +368,16 @@ public struct CommandKeyView: View {
                 }
             } else if requiredCapability(for: slot) == nil {
                 failures.append("\(tag) has no required capability")
+            }
+        }
+
+        // With the caption gone the icon is the whole face, so two slots sharing
+        // one would be two indistinguishable keys.
+        for (index, first) in slots.enumerated() {
+            for second in slots.dropFirst(index + 1) where iconName(for: first) == iconName(for: second) {
+                failures.append(
+                    "\(first.rawValue) and \(second.rawValue) share the icon \"\(iconName(for: first))\""
+                )
             }
         }
 

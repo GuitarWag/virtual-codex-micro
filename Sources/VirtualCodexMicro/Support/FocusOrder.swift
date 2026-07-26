@@ -76,14 +76,16 @@ public struct FocusOrder: Sendable, Equatable {
         case agent(Int)
         case command(PanelLayout.CommandSlot)
         case dial
-        case pad(PanelLayout.PadDirection)
+        case joystick
+        case overflow
 
         public var hitTargetName: String {
             switch self {
             case .agent(let index): "agent \(index)"
             case .command(let slot): "command \(slot.rawValue)"
             case .dial: "dial ring"
-            case .pad(let direction): "pad \(direction.rawValue)"
+            case .joystick: "joystick"
+            case .overflow: "overflow"
             }
         }
 
@@ -92,7 +94,8 @@ public struct FocusOrder: Sendable, Equatable {
             case .agent: .agents
             case .command: .commands
             case .dial: .dial
-            case .pad: .pad
+            case .joystick: .pad
+            case .overflow: .status
             }
         }
     }
@@ -104,7 +107,7 @@ public struct FocusOrder: Sendable, Equatable {
         (0 ..< PanelLayout.agentKeyCount).map { Target.agent($0) }
             + PanelLayout.CommandSlot.allCases.map { Target.command($0) }
             + [.dial]
-            + PanelLayout.PadDirection.allCases.map { Target.pad($0) }
+            + [.joystick, .overflow]
 
     // MARK: - What is currently reachable
 
@@ -121,17 +124,22 @@ public struct FocusOrder: Sendable, Equatable {
     /// today — see the audit — so this defaults to the current behaviour and is
     /// the single place to tighten when the dial is capability-gated in M2.
     public var dialAcceptsInput: Bool
+    /// Whether the overflow chip has anything to show. An empty chip renders
+    /// nothing, so it must not be a keyboard stop.
+    public var hasUnboundSessions: Bool
 
     public init(
         capabilities: SessionCapabilities?,
         canSpawnSessions: Bool = true,
         boundPadDirections: Set<PanelLayout.PadDirection> = [],
-        dialAcceptsInput: Bool = true
+        dialAcceptsInput: Bool = true,
+        hasUnboundSessions: Bool = false
     ) {
         self.capabilities = capabilities
         self.canSpawnSessions = canSpawnSessions
         self.boundPadDirections = boundPadDirections
         self.dialAcceptsInput = dialAcceptsInput
+        self.hasUnboundSessions = hasUnboundSessions
     }
 
     /// An agent key is always a stop, including an empty one: clicking or
@@ -146,10 +154,15 @@ public struct FocusOrder: Sendable, Equatable {
             CommandKeyView.isEnabled(slot, capabilities: capabilities, canSpawnSessions: canSpawnSessions)
         case .dial:
             dialAcceptsInput
-        case .pad(let direction):
-            // The owning rule, called rather than copied: centre is always live,
-            // a cardinal is live only while something is bound to it.
-            DirectionPadView.isActionable(direction, presets: padPresets)
+        case .joystick:
+            // One control now, not five keys — the reference device has a single
+            // stick. It is live if any direction is bound, or always, because its
+            // centre opens the preset chooser.
+            true
+        case .overflow:
+            // Reachable only when there is something to overflow. An empty chip
+            // renders nothing, so focusing it would be a dead stop.
+            hasUnboundSessions
         }
     }
 
@@ -283,7 +296,7 @@ public struct FocusOrder: Sendable, Equatable {
         // 3. Zones are walked as contiguous runs, in the documented order. A zone
         //    interleaved with another is the version of this order that reads as
         //    random when tabbed through.
-        let expectedZones: [PanelLayout.Zone] = [.agents, .commands, .dial, .pad]
+        let expectedZones: [PanelLayout.Zone] = [.agents, .commands, .dial, .pad, .status]
         var runs: [PanelLayout.Zone] = []
         for target in order where runs.last != target.zone { runs.append(target.zone) }
         check("zone runs are \(runs.map(\.rawValue)), expected \(expectedZones.map(\.rawValue))",
@@ -347,11 +360,15 @@ public struct FocusOrder: Sendable, Equatable {
                     failures.append("\(label): command \(slot.rawValue) focusability disagrees with CommandKeyView")
                 }
             }
-            for direction in PanelLayout.PadDirection.allCases {
-                let bound = direction == .center || focusOrder.boundPadDirections.contains(direction)
-                if focusOrder.isFocusable(.pad(direction)) != bound {
-                    failures.append("\(label): pad \(direction.rawValue) focusability disagrees with DirectionPadView")
-                }
+            // The joystick is one stop and is always live (its centre opens the
+            // chooser even with nothing bound), so it has no per-direction
+            // agreement to check. The overflow chip must be focusable exactly when
+            // there is something to show.
+            if focusOrder.isFocusable(.joystick) != true {
+                failures.append("\(label): the joystick should always be focusable")
+            }
+            if focusOrder.isFocusable(.overflow) != focusOrder.hasUnboundSessions {
+                failures.append("\(label): overflow focusability disagrees with whether anything is unbound")
             }
 
             // 4b. Every stop next/previous hands back is actually focusable, from

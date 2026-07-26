@@ -23,7 +23,17 @@ final class PanelCoordinator: ObservableObject {
     private var engine = StateEngine()
     private var registry = SessionRegistry()
     private var drift = DriftGuard()
-    private let backend = MockBackend()
+    /// Demo driver, opt-in via `VCM_DEMO=1`. Kept because it is also M2's exit
+    /// criterion: a non-real adapter bound alongside real ones is what proves the
+    /// UI never branches on which backend it is talking to.
+    private let demoBackend = MockBackend()
+    private let useDemoBackend = ProcessInfo.processInfo.environment["VCM_DEMO"] != nil
+
+    /// The real sources. Hooks are the only thing that can light the amber key;
+    /// tailing is the only thing that can populate a key at launch, because hooks
+    /// are edge-triggered with no snapshot. Neither is sufficient alone.
+    private let hooks = ClaudeHookSource()
+    private var transcripts = ClaudeTranscriptSource()
     private var driftObserver: DriftTriggerObserver?
 
     /// The mock's own source. Long staleness threshold on purpose: the demo
@@ -64,6 +74,8 @@ final class PanelCoordinator: ObservableObject {
         return coordinator
     }
 
+    private var known: [String: DiscoveredSession] = [:]
+    private var knownPIDs: [String: Int32?] = [:]
     private var demoStates: [Int: AgentState]?
     private var demoSessions: [Int: AgentSession] = [:]
     private var demoCapabilities: SessionCapabilities = .observed
@@ -78,19 +90,129 @@ final class PanelCoordinator: ObservableObject {
     // MARK: - Bootstrap
 
     private func bootstrap() async {
-        let discovered = ((try? await backend.discoverSessions()) ?? [])
-            .map { DiscoveredSession(session: $0) }
+        if useDemoBackend {
+            await runDemo()
+            return
+        }
+        await runLive()
+    }
 
+    private func runDemo() async {
+        let discovered = ((try? await demoBackend.discoverSessions()) ?? [])
+            .map { DiscoveredSession(session: $0) }
         for (slot, found) in discovered.prefix(PanelLayout.agentKeyCount).enumerated() {
             _ = registry.bind(found, to: slot, engine: &engine, at: Date())
             record(found.session.state, for: found.session.id, from: Self.mockSource)
         }
         refresh(discovered: discovered)
-
-        for await updated in backend.stateUpdates() {
+        for await updated in demoBackend.stateUpdates() {
             record(updated.state, for: updated.id, from: Self.mockSource)
             refresh(discovered: discovered)
         }
+    }
+
+    /// Cold start from disk, then follow both live channels.
+    private func runLive() async {
+        // Tailing first and on its own: at launch there are no hook events to
+        // catch up on, so this is the only way six keys can mean anything before
+        // the next transition happens.
+        pollTranscripts()
+        autobindFreeSlots()
+        refresh(discovered: discoveredSessions)
+
+        await withTaskGroup(of: Void.self) { group in
+            group.addTask { [weak self] in await self?.followHooks() }
+            group.addTask { [weak self] in await self?.followTranscripts() }
+        }
+    }
+
+    private func followHooks() async {
+        for await event in hooks.events() {
+            apply(event)
+        }
+    }
+
+    private func followTranscripts() async {
+        for await readings in ClaudeTranscriptSource.updates() {
+            ingest(readings)
+            autobindFreeSlots()
+            refresh(discovered: discoveredSessions)
+        }
+    }
+
+    /// One hook event. Everything the source decided to ignore still reaches the
+    /// log, because "we received it and chose not to act" is exactly what the
+    /// activity strip exists to show.
+    private func apply(_ event: HookEvent) {
+        switch event.outcome {
+        case .state(let state):
+            record(state, for: event.sessionID, from: .claudeHooks)
+        case .openSlot:
+            pollTranscripts()
+            autobindFreeSlots()
+        case .closeSlot:
+            if let slot = slot(for: event.sessionID) {
+                registry.unbind(slot, engine: &engine)
+            }
+        case .ignored(let reason):
+            log.record(ActivityEntry(at: Date(), slot: slot(for: event.sessionID),
+                                     sessionID: event.sessionID,
+                                     event: .note("\(event.name) ignored: \(reason)")))
+        }
+        refresh(discovered: discoveredSessions)
+    }
+
+    private func pollTranscripts() {
+        ingest(transcripts.poll(now: Date(), liveSessions: ClaudeTranscriptSource.liveSessions()))
+    }
+
+    private func ingest(_ readings: [ClaudeTranscriptSource.Reading]) {
+        for reading in readings {
+            record(reading.state, for: reading.sessionID, from: .claudeTranscript)
+            engine.setLiveness(reading.liveness, for: reading.sessionID)
+            knownPIDs[reading.sessionID] = reading.pid
+            known[reading.sessionID] = DiscoveredSession(
+                session: AgentSession(
+                    id: reading.sessionID,
+                    backendID: "claude",
+                    title: Self.title(fromTranscriptPath: reading.transcriptPath),
+                    repoPath: Self.repoPath(fromTranscriptPath: reading.transcriptPath),
+                    state: reading.state,
+                    confidence: .inferred,
+                    // Observed: a session we did not spawn cannot be typed into.
+                    capabilities: .observed
+                ),
+                pid: reading.pid
+            )
+        }
+    }
+
+    /// Fill empty slots in the registry's own priority order, so a blocked agent
+    /// is never the one left unbound.
+    private func autobindFreeSlots() {
+        let free = (0 ..< PanelLayout.agentKeyCount).filter { registry.binding(at: $0) == nil }
+        guard !free.isEmpty else { return }
+        var candidates = registry.unbound(from: discoveredSessions)
+        for slot in free {
+            guard let next = candidates.first else { break }
+            candidates.removeFirst()
+            _ = registry.bind(next, to: slot, engine: &engine, at: Date())
+        }
+    }
+
+    private var discoveredSessions: [DiscoveredSession] { Array(known.values) }
+
+    /// The project slug is the cwd with "/" replaced by "-"; enough to show a
+    /// recognisable name without pretending we know the repo layout.
+    private static func repoPath(fromTranscriptPath path: String) -> String? {
+        let slug = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
+        guard !slug.isEmpty else { return nil }
+        return slug.replacingOccurrences(of: "-", with: "/")
+    }
+
+    private static func title(fromTranscriptPath path: String) -> String {
+        let repo = repoPath(fromTranscriptPath: path) ?? "session"
+        return URL(fileURLWithPath: repo).lastPathComponent
     }
 
     private func record(_ state: AgentState, for sessionID: String, from source: StateSource) {
@@ -130,8 +252,8 @@ final class PanelCoordinator: ObservableObject {
             trigger: trigger,
             registry: &registry,
             engine: &engine,
-            discovered: [],
-            liveSessions: nil,
+            discovered: discoveredSessions,
+            liveSessions: useDemoBackend ? nil : ClaudeTranscriptSource.liveSessions(),
             at: Date()
         )
         log.record(ActivityEntry(at: Date(), event: .note(report.summary)))
@@ -174,7 +296,7 @@ final class PanelCoordinator: ObservableObject {
         guard let binding = registry.binding(at: slot) else { return }
         // Focus is the one action available on a session we do not own, and it
         // reports a tier rather than a boolean — the UI must not promise more.
-        guard let pid = binding.pid else {
+        guard let pid = binding.pid ?? knownPIDs[binding.sessionID] ?? nil else {
             log.record(ActivityEntry(at: Date(), slot: slot, sessionID: binding.sessionID,
                                      event: .note("cannot focus: no pid recorded for this session")))
             refresh(discovered: [])
@@ -206,7 +328,16 @@ final class PanelCoordinator: ObservableObject {
         Task {
             let now = Date()
             do {
-                try await backend.dispatch(command, to: binding.sessionID)
+                guard useDemoBackend else {
+                    // Observed sessions cannot be typed into, and no owned session
+                    // is spawned yet. Refusing loudly beats pretending: the key is
+                    // already disabled for these capabilities, so reaching here at
+                    // all is a bug worth seeing in the log.
+                    throw MockBackendError.notPermitted(
+                        command: "\(command)", sessionID: binding.sessionID
+                    )
+                }
+                try await demoBackend.dispatch(command, to: binding.sessionID)
                 // `.sent`, not `.confirmed`. The adapter accepting a command is not
                 // evidence the agent acted on it — only a confirming event is, and
                 // that arrives separately through the hook stream.

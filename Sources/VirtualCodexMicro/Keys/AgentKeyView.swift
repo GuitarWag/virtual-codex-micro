@@ -1,3 +1,4 @@
+import AppKit
 import SwiftUI
 
 /// One agent key. Six of these are the product: they carry the whole
@@ -7,10 +8,15 @@ import SwiftUI
 /// Three rules shaped the code below, and they are worth stating because they
 /// are what the self-check defends:
 ///
-/// 1. **State is hue plus text, always.** `AgentState.label` is rendered on the
-///    key face and an icon sits beside it. Colour is the fast channel, not the
-///    only one. `selfCheckFailures()` walks `AgentState.allCases`, so an eighth
-///    state cannot ship as colour-only.
+/// 1. **State is hue plus shape, always.** The reference caps carry no text —
+///    they are frosted plastic with one small glyph in the middle — so the word
+///    that used to sit on the face is gone. The second channel is therefore the
+///    glyph, and it has to work harder for it: a different SF Symbol per state,
+///    never one dot recoloured, with the full `AgentState.label` in the
+///    VoiceOver value and the tooltip. `selfCheckFailures()` walks
+///    `AgentState.allCases`, asserts all seven glyphs differ, and asserts each
+///    resolves as a real symbol, so an eighth state cannot ship as colour-only
+///    or as a duplicate mark.
 /// 2. **Interaction never speaks in colour.** Hover, press and keyboard focus
 ///    change geometry only — lift, depress, detached ring. Fill opacity, glow
 ///    opacity and every colour are functions of state alone. A key that looks
@@ -94,6 +100,11 @@ public struct AgentKeyView: View {
         /// on, or when the fill is opaque anyway and the material would be
         /// invisible work.
         public let usesMaterial: Bool
+        /// Moulded keycap: domed top highlight, shaded lower sidewall, and a
+        /// shadow where the cap meets the plate. All three are soft translucent
+        /// passes, so Reduce Transparency turns them off and the cap falls back
+        /// to a flat fill with a thick edge.
+        public let usesDepth: Bool
 
         /// Geometry-only interaction cues.
         public let scale: Double
@@ -114,17 +125,26 @@ public struct AgentKeyView: View {
         }
     }
 
-    /// Second, non-colour channel for status. Never empty — status is never
-    /// hue-only, and the self-check enforces that across `allCases`.
+    /// Second, non-colour channel for status, and since the word came off the
+    /// cap it is now the *only* on-panel channel besides hue. Never empty, never
+    /// shared between two states — the self-check enforces both across
+    /// `allCases`.
+    ///
+    /// Circle-framed on purpose: the reference caps all carry one small round
+    /// glyph, so the family gives the panel the right silhouette. The mark
+    /// *inside* the ring is what separates the states, which is why the ring is
+    /// never the whole glyph. `error` breaks the family deliberately — an
+    /// octagon reads as "stop" at a glance and at the far edge of vision, and
+    /// "failed" is the reading this panel can least afford to lose.
     public static func iconName(for state: AgentState) -> String {
         switch state {
         case .unassigned: "circle.dashed"
-        case .idle: "pause.fill"
-        case .running: "play.fill"
-        case .complete: "checkmark"
-        case .needsInput: "hand.raised.fill"
+        case .idle: "pause.circle"
+        case .running: "play.circle.fill"
+        case .complete: "checkmark.circle.fill"
+        case .needsInput: "exclamationmark.circle.fill"
         case .error: "xmark.octagon.fill"
-        case .unknown: "questionmark"
+        case .unknown: "questionmark.circle.fill"
         }
     }
 
@@ -231,6 +251,7 @@ public struct AgentKeyView: View {
             edgeWidth: edgeWidth,
             dashedEdge: motif == .emptySlot,
             usesMaterial: !reduceTransparency && fillOpacity < 1,
+            usesDepth: !reduceTransparency,
             scale: scale,
             showsHoverRim: treatment == .hovered,
             showsFocusRing: interaction.isFocused
@@ -326,22 +347,44 @@ public struct AgentKeyView: View {
         let swatch = StateColors.swatch(for: state, in: appearance)
 
         return ZStack {
+            // Cap body. Material plus tint, in that order and at that opacity,
+            // because this is exactly the stack `StateColors` measures: the
+            // middle of the face composites to `composedKeyFill`, so the
+            // luminance ladder the palette enforces is the ladder the eye gets.
+            // Everything after this point is lighting, and lighting is not
+            // allowed to repaint the centre.
             if p.usesMaterial {
                 keyShape.fill(.ultraThinMaterial)
             }
             keyShape.fill(swatch.keyFill.color.opacity(p.fillOpacity))
 
-            // Inner glow: a fat border blurred and clipped back to the shape,
-            // so the light appears to come from inside the key edge.
-            keyShape
-                .strokeBorder(swatch.stateGlow.color, lineWidth: side * 0.2)
-                .blur(radius: p.glowRadius)
-                .clipShape(keyShape)
-                .opacity(p.glowOpacity * (isPulsing ? 0.5 : 1))
-                .animation(pulseAnimation, value: isPulsing)
+            // The light lives inside the cap. Brightest at the middle, falling
+            // off into the frosted sidewalls — which is what the reference
+            // photographs show and the inverse of what this used to draw (a fat
+            // blurred inner border, i.e. a lit rim around a flat centre).
+            //
+            // `glowRadius` becomes spread rather than blur, so a pressed key
+            // still tucks its light in without any channel changing brightness.
+            keyShape.fill(
+                RadialGradient(
+                    gradient: Gradient(colors: [
+                        swatch.stateGlow.color,
+                        swatch.stateGlow.color.opacity(0),
+                    ]),
+                    center: UnitPoint(x: 0.5, y: 0.44),
+                    startRadius: 0,
+                    endRadius: max(side * 0.2, side * (0.34 + p.glowRadius / 42))
+                )
+            )
+            .opacity(p.glowOpacity * (isPulsing ? 0.5 : 1))
+            .animation(pulseAnimation, value: isPulsing)
 
             if p.motif == .lostTrack {
                 hatch(swatch)
+            }
+
+            if p.usesDepth {
+                moulding
             }
 
             keyShape.strokeBorder(swatch.keyEdge.color.opacity(0.85), style: edgeStyle(p))
@@ -357,9 +400,48 @@ public struct AgentKeyView: View {
             content(swatch, p)
         }
         .frame(width: side, height: side)
+        .background { if p.usesDepth { plateShadow(pressed: p.treatment == .pressed) } }
         .contentShape(keyShape)
         .scaleEffect(p.scale)
         .overlay { if p.showsFocusRing { focusRing(swatch) } }
+    }
+
+    /// Domed top and shaded lower sidewall, in one pass.
+    ///
+    /// Achromatic deliberately: white plastic and its own shadow have no hue, so
+    /// the state palette keeps its monopoly on colour and none of this can be
+    /// mistaken for a state. It is also why the two halves are paired — the
+    /// highlight lifts the top band and the shade drops the bottom band by a
+    /// comparable amount, so the cap gains relief without the whole face
+    /// drifting toward white. A uniform white frost over every cap would flatten
+    /// the palette's luminance ladder, which is the one thing this restyle was
+    /// not allowed to cost.
+    private var moulding: some View {
+        keyShape.fill(
+            LinearGradient(
+                stops: [
+                    .init(color: .white.opacity(0.32), location: 0),
+                    .init(color: .white.opacity(0.07), location: 0.30),
+                    .init(color: .clear, location: 0.52),
+                    .init(color: .black.opacity(0.05), location: 0.72),
+                    .init(color: .black.opacity(0.20), location: 1),
+                ],
+                startPoint: .top,
+                endPoint: .bottom
+            )
+        )
+        .allowsHitTesting(false)
+    }
+
+    /// Where the cap meets the plate. Drawn as its own blurred shape behind the
+    /// key rather than a `.shadow` on the fill, because the fill is translucent
+    /// and would let its own shadow darken the lower half of the face.
+    private func plateShadow(pressed: Bool) -> some View {
+        keyShape
+            .fill(.black.opacity(pressed ? 0.14 : 0.24))
+            .blur(radius: side * (pressed ? 0.05 : 0.09))
+            .offset(y: side * (pressed ? 0.02 : 0.055))
+            .allowsHitTesting(false)
     }
 
     private var pulseAnimation: Animation? {
@@ -391,30 +473,33 @@ public struct AgentKeyView: View {
         .allowsHitTesting(false)
     }
 
-    /// Slot number, state icon, state label. That is the whole budget — session
-    /// title, repo and branch belong in the popover.
+    /// One centred glyph, plus the slot number kept quiet in the corner.
+    ///
+    /// The state's word used to be here and is not any more: the reference caps
+    /// have no text on them at all, and a word in 9pt on a 46pt cap was the main
+    /// reason the panel did not look like the object. The word did not
+    /// disappear, it moved — `accessibilityValue` and the tooltip both carry
+    /// `state.label`, so the reading is still available on demand to everyone,
+    /// it just is not silkscreened onto plastic that never had it.
+    ///
+    /// The number stays because six identical caps need addressing, but at a
+    /// third of the glyph's presence, which is roughly where the reference's
+    /// moulded markings sit.
     private func content(_ swatch: StateColors.StateSwatch, _ p: Presentation) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline, spacing: 0) {
-                Text("\(index + 1)")
-                    .font(.system(size: max(PanelLayout.minimumFontSize, side * 0.19), weight: .semibold).monospacedDigit())
-                    .opacity(p.motif == .emptySlot ? 0.55 : 0.85)
-                Spacer(minLength: 0)
-                Image(systemName: Self.iconName(for: state))
-                    .font(.system(
-                        size: max(PanelLayout.minimumFontSize, side * 0.2),
-                        weight: p.motif == .lostTrack ? .black : .semibold
-                    ))
-            }
-            Spacer(minLength: 0)
-            Text(state.label)
-                .font(.system(size: max(PanelLayout.minimumFontSize, side * 0.175), weight: .medium))
-                .lineLimit(1)
-                .minimumScaleFactor(0.65)
-                .frame(maxWidth: .infinity, alignment: .leading)
+        ZStack {
+            Image(systemName: Self.iconName(for: state))
+                .font(.system(
+                    size: layout.fontSize(17),
+                    weight: p.motif == .lostTrack ? .bold : .regular
+                ))
+                .opacity(p.motif == .emptySlot ? 0.6 : 0.92)
+            Text("\(index + 1)")
+                .font(.system(size: layout.fontSize(9), weight: .semibold).monospacedDigit())
+                .opacity(0.4)
+                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .foregroundStyle(swatch.keyLabel.color)
-        .padding(side * 0.11)
+        .padding(side * 0.1)
     }
 
     /// Keyboard focus: a detached two-tone ring *outside* the key. Nothing else
@@ -467,6 +552,28 @@ public struct AgentKeyView: View {
             }
             if iconName(for: state).isEmpty {
                 failures.append("\(state.rawValue) has no icon, leaving colour and text only")
+            }
+        }
+
+        // 1b. The glyph is the only on-panel channel besides hue now that the
+        //     word is off the cap, so two states sharing one mark would be a
+        //     colour-only pair in practice. Pairwise, not a Set count, so the
+        //     message names the collision.
+        for (index, first) in AgentState.allCases.enumerated() {
+            for second in AgentState.allCases.dropFirst(index + 1)
+            where iconName(for: first) == iconName(for: second) {
+                failures.append(
+                    "\(first.rawValue) and \(second.rawValue) share the glyph \"\(iconName(for: first))\""
+                )
+            }
+        }
+        // A name that does not resolve draws nothing at all, which is the same
+        // failure as having no second channel. Resolved, not trusted.
+        for state in AgentState.allCases {
+            let icon = iconName(for: state)
+            if !icon.isEmpty,
+               NSImage(systemSymbolName: icon, accessibilityDescription: nil) == nil {
+                failures.append("\(state.rawValue) glyph \"\(icon)\" does not resolve as an SF Symbol")
             }
         }
 
@@ -595,6 +702,11 @@ public struct AgentKeyView: View {
                 }
                 if p.edgeWidth < 1.5 {
                     failures.append("\(state.rawValue) has no defined edge under Reduce Transparency")
+                }
+                // The moulding and the plate shadow are translucent passes, so
+                // they go with the frost rather than surviving it.
+                if p.usesDepth {
+                    failures.append("\(state.rawValue) keeps the moulded cap under Reduce Transparency")
                 }
             }
         }

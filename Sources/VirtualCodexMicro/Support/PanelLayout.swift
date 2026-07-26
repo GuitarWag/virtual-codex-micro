@@ -1,353 +1,312 @@
 import CoreGraphics
 import Foundation
 
-/// Single source of truth for the panel's geometry. Every view reads its
-/// position and size from here, so a spacing change is one edit rather than six.
+/// Geometry for the control surface. Single source of truth: every view reads
+/// positions from here, so a spacing change never means editing six view files.
 ///
-/// Coordinate space is SwiftUI's: origin top-left, y grows downward. Frames are
-/// absolute within `panelBounds`, so a view places itself with
-/// `.position(x: frame.midX, y: frame.midY)` inside a `ZStack` sized to
-/// `panelSize`, or with `.offset` under `.topLeading` alignment.
+/// ## Why this is one grid and not four zones
 ///
-/// Fidelity note: zone order, zone placement and key counts follow the hardware
-/// control map — six agent keys in a 3x2 block as the dominant cluster, command
-/// keys as a quieter secondary cluster, dial on the right, four-way pad
-/// lower-left. Absolute proportions do not. The hardware's keycaps are sized for
-/// fingers on a pitch we have no reason to copy; a pointer needs a reliable
-/// click target and a screen has no travel or tactile edge to help it land. So
-/// the numbers below are tuned for `minimumHitTarget`, and the deliberate
-/// deviation is that the four-way pad is proportionally larger than a physical
-/// thumb joystick would be — five targets in one 3x3 grid is the tightest zone
-/// on the panel, and it, not the agent keys, sets the floor for how small the
-/// compact size can go.
+/// An earlier version of this file laid out four separately-placed clusters, which
+/// is what the PRD's "four zones" language implies. The reference photographs in
+/// `docs/` show that is wrong: the real device is a single uniform **4x4 grid** on
+/// a square plate, with the rotary encoder occupying the top-left cell and the
+/// joystick the top-right cell — both *inside* the grid, not beside it.
+///
+/// ```
+///   [encoder] [agent 0] [agent 1] [joystick]
+///   [agent 2] [agent 3] [agent 4] [agent 5]
+///   [bolt]    [accept]  [reject]  [branch]
+///   [status]  [---- mic 2u ----]  [face]
+/// ```
+///
+/// Consequences worth knowing before editing:
+///
+/// - **Zones are logical, not spatial.** `agentZone` is the bounding box of six
+///   keys that straddle two rows, so it necessarily contains the encoder and
+///   joystick cells. Zone-versus-zone overlap is therefore no longer an invariant
+///   and the self-check does not assert it. The invariant that matters — and is
+///   asserted — is that no two *interactive targets* overlap.
+/// - **The joystick is one control, not five keys.** Five 28pt targets do not fit
+///   in a 46pt cell. `padFrame(_:)` returns gesture sub-regions for direction
+///   hit-testing, and those are marked `nested` so they are exempt from the hit
+///   floor; the stick itself is the single focusable target. That matches the
+///   hardware, where you push one stick rather than press four caps.
 public struct PanelLayout: Sendable, Equatable {
 
-    // MARK: - Size classes
+    // MARK: - Size class
 
     public enum SizeClass: String, CaseIterable, Sendable {
-        case compact
-        case regular
+        case regular, compact
 
-        /// One factor drives everything. Overlap and containment are
-        /// scale-invariant, so adding a size class later cannot break the layout
-        /// — only the hit-target floor is scale-dependent, and it is clamped.
         public var scale: CGFloat {
             switch self {
-            case .compact: max(PanelLayout.requestedCompactScale, PanelLayout.minimumScale)
             case .regular: 1
+            case .compact: max(PanelLayout.requestedCompactScale, PanelLayout.minimumScale)
             }
         }
     }
 
     public enum Zone: String, CaseIterable, Sendable {
-        case agents
-        case commands
-        case dial
-        case pad
+        case agents, commands, dial, pad, status
     }
 
-    /// Fixed-purpose command keys in stable grid order (row-major). Positions
-    /// are load-bearing for muscle memory: accept sits top-left because it is
-    /// the most used, and this ordering must not be reshuffled once shipped.
+    /// The six command positions, in grid order: the bolt, accept, reject and
+    /// branch keys across row 3, then the wide microphone and the face key.
     public enum CommandSlot: String, CaseIterable, Sendable {
-        case accept
-        case reject
-        case newSession
-        case pushToTalk
-        case custom1
-        case custom2
+        case custom1, accept, reject, newSession, pushToTalk, custom2
     }
 
     public enum PadDirection: String, CaseIterable, Sendable {
-        case up
-        case right
-        case down
-        case left
-        case center
+        case up, right, down, left, center
     }
-
-    // MARK: - Hit target floor
-
-    /// No interactive element is ever smaller than this square, at any size
-    /// class. A key too small to click reliably defeats the point of the panel.
-    public static let minimumHitTarget: CGFloat = 28
-
-    /// Floor for any label rendered on the panel. The a11y audit measured real
-    /// label sizes of 6.40–8.00pt once the compact scale was applied, which is
-    /// below what is readable at a glance — and glanceability is the product.
-    ///
-    /// This lives here rather than at each call site for the same reason
-    /// `minimumScale` does: one definition that every consumer routes through,
-    /// so a future scale change cannot quietly shrink text again. Call
-    /// `fontSize(_:)` instead of multiplying by `scale` yourself.
-    public static let minimumFontSize: CGFloat = 9
-
-    /// A base point size scaled for this layout, never dropping below
-    /// `minimumFontSize`. Text stops shrinking before it stops being readable;
-    /// the panel has label width to spare, so the clamp costs layout nothing.
-    public func fontSize(_ base: CGFloat) -> CGFloat {
-        max(PanelLayout.minimumFontSize, base * scale)
-    }
-
-    /// Smallest interactive element at base scale (one pad cell). The compact
-    /// scale is clamped against this rather than trusted, so nudging
-    /// `requestedCompactScale` down can shrink the panel but can never produce a
-    /// key below the floor.
-    static let smallestBaseTarget: CGFloat = padCellSide
-    static let minimumScale: CGFloat = minimumHitTarget / smallestBaseTarget
-    static let requestedCompactScale: CGFloat = 0.8
-
-    // MARK: - Base geometry (regular size, points)
-
-    private static let panelPadding: CGFloat = 16
-    /// Gap between zones. Larger than the gap between keys inside a zone, so the
-    /// four clusters read as four groups without needing borders.
-    private static let zoneGap: CGFloat = 14
-
-    private static let agentColumns = 3
-    private static let agentRows = 2
-    private static let agentKeySide: CGFloat = 56
-    private static let agentKeyGap: CGFloat = 10
-
-    private static let commandColumns = 3
-    private static let commandRows = 2
-    private static let commandKeySide: CGFloat = 40
-    private static let commandKeyGap: CGFloat = 8
-
-    /// 3x3 cell grid; the five cardinal cells are targets, corners are inert.
-    private static let padCellSide: CGFloat = 36
-    private static let padSide: CGFloat = padCellSide * 3
-
-    private static let dialDiameter: CGFloat = 108
-    /// Centre reset target, concentric inside the ring.
-    private static let dialCenterDiameter: CGFloat = 40
-
-    private static let baseCornerRadius: CGFloat = 22
-    private static let baseAgentKeyCornerRadius: CGFloat = 12
-    private static let baseCommandKeyCornerRadius: CGFloat = 9
-
-    // Derived base rects. Written once here; everything public just scales them.
-    private static let agentZoneBase = CGRect(
-        x: panelPadding,
-        y: panelPadding,
-        width: CGFloat(agentColumns) * agentKeySide + CGFloat(agentColumns - 1) * agentKeyGap,
-        height: CGFloat(agentRows) * agentKeySide + CGFloat(agentRows - 1) * agentKeyGap
-    )
-
-    private static let padZoneBase = CGRect(
-        x: panelPadding,
-        y: agentZoneBase.maxY + zoneGap,
-        width: padSide,
-        height: padSide
-    )
-
-    private static let commandZoneBase: CGRect = {
-        let width = CGFloat(commandColumns) * commandKeySide + CGFloat(commandColumns - 1) * commandKeyGap
-        let height = CGFloat(commandRows) * commandKeySide + CGFloat(commandRows - 1) * commandKeyGap
-        return CGRect(
-            x: padZoneBase.maxX + zoneGap,
-            y: padZoneBase.midY - height / 2,
-            width: width,
-            height: height
-        )
-    }()
-
-    private static let panelSizeBase = CGSize(
-        width: max(agentZoneBase.maxX, commandZoneBase.maxX) + zoneGap + dialDiameter + panelPadding,
-        height: padZoneBase.maxY + panelPadding
-    )
-
-    /// Right-side band, vertically centred on the panel rather than aligned to a
-    /// neighbouring zone — a rotary reads as its own control, not as part of a
-    /// row.
-    private static let dialZoneBase = CGRect(
-        x: panelSizeBase.width - panelPadding - dialDiameter,
-        y: (panelSizeBase.height - dialDiameter) / 2,
-        width: dialDiameter,
-        height: dialDiameter
-    )
-
-    // MARK: - Instance
-
-    public let sizeClass: SizeClass
-
-    public init(sizeClass: SizeClass) {
-        self.sizeClass = sizeClass
-    }
-
-    public static let compact = PanelLayout(sizeClass: .compact)
-    public static let regular = PanelLayout(sizeClass: .regular)
-
-    public var scale: CGFloat { sizeClass.scale }
-
-    private func scaled(_ value: CGFloat) -> CGFloat { value * scale }
-
-    private func scaled(_ rect: CGRect) -> CGRect {
-        CGRect(
-            x: rect.origin.x * scale,
-            y: rect.origin.y * scale,
-            width: rect.width * scale,
-            height: rect.height * scale
-        )
-    }
-
-    // MARK: - Panel
-
-    public var panelSize: CGSize {
-        CGSize(width: scaled(Self.panelSizeBase.width), height: scaled(Self.panelSizeBase.height))
-    }
-
-    public var panelBounds: CGRect { CGRect(origin: .zero, size: panelSize) }
-
-    /// Corner radius of the device-like silhouette that replaces window chrome.
-    public var cornerRadius: CGFloat { scaled(Self.baseCornerRadius) }
-
-    public var agentKeyCornerRadius: CGFloat { scaled(Self.baseAgentKeyCornerRadius) }
-    public var commandKeyCornerRadius: CGFloat { scaled(Self.baseCommandKeyCornerRadius) }
-
-    // MARK: - Zones
-
-    public var agentZone: CGRect { scaled(Self.agentZoneBase) }
-    public var commandZone: CGRect { scaled(Self.commandZoneBase) }
-    public var dialZone: CGRect { scaled(Self.dialZoneBase) }
-    public var padZone: CGRect { scaled(Self.padZoneBase) }
-
-    public func zoneFrame(_ zone: Zone) -> CGRect {
-        switch zone {
-        case .agents: agentZone
-        case .commands: commandZone
-        case .dial: dialZone
-        case .pad: padZone
-        }
-    }
-
-    public var zoneFrames: [(zone: Zone, frame: CGRect)] {
-        Zone.allCases.map { ($0, zoneFrame($0)) }
-    }
-
-    // MARK: - Agent keys (zone 1)
-
-    public static let agentKeyCount = agentColumns * agentRows
-
-    /// Row-major: index 0 is top-left, 2 is top-right, 3 starts the second row.
-    /// Slot identity is stable, so key 3 stays key 3 across size classes.
-    public var agentKeyFrames: [CGRect] {
-        (0 ..< Self.agentKeyCount).map { index in
-            let column = index % Self.agentColumns
-            let row = index / Self.agentColumns
-            return scaled(
-                CGRect(
-                    x: Self.agentZoneBase.minX + CGFloat(column) * (Self.agentKeySide + Self.agentKeyGap),
-                    y: Self.agentZoneBase.minY + CGFloat(row) * (Self.agentKeySide + Self.agentKeyGap),
-                    width: Self.agentKeySide,
-                    height: Self.agentKeySide
-                )
-            )
-        }
-    }
-
-    /// Traps on an out-of-range index: `agentKeyCount` is fixed, so a bad index
-    /// is a programming error, and a silently-zero frame would draw a key at the
-    /// panel origin instead of failing.
-    public func agentKeyFrame(_ index: Int) -> CGRect { agentKeyFrames[index] }
-
-    // MARK: - Command keys (zone 2)
-
-    public var commandKeyFrames: [CGRect] {
-        CommandSlot.allCases.indices.map { index in
-            let column = index % Self.commandColumns
-            let row = index / Self.commandColumns
-            return scaled(
-                CGRect(
-                    x: Self.commandZoneBase.minX + CGFloat(column) * (Self.commandKeySide + Self.commandKeyGap),
-                    y: Self.commandZoneBase.minY + CGFloat(row) * (Self.commandKeySide + Self.commandKeyGap),
-                    width: Self.commandKeySide,
-                    height: Self.commandKeySide
-                )
-            )
-        }
-    }
-
-    public func commandKeyFrame(_ slot: CommandSlot) -> CGRect {
-        commandKeyFrames[CommandSlot.allCases.firstIndex(of: slot) ?? 0]
-    }
-
-    // MARK: - Dial (zone 3)
-
-    public var dialFrame: CGRect { dialZone }
-
-    /// Concentric inside `dialFrame` by design — the reset target is part of the
-    /// rotary, not a sibling key, so it is exempt from the overlap sweep.
-    public var dialCenterFrame: CGRect {
-        let outer = Self.dialZoneBase
-        let inset = (Self.dialDiameter - Self.dialCenterDiameter) / 2
-        return scaled(outer.insetBy(dx: inset, dy: inset))
-    }
-
-    // MARK: - Four-direction pad (zone 4)
-
-    public func padFrame(_ direction: PadDirection) -> CGRect {
-        let (column, row): (Int, Int) = switch direction {
-        case .up: (1, 0)
-        case .left: (0, 1)
-        case .center: (1, 1)
-        case .right: (2, 1)
-        case .down: (1, 2)
-        }
-        return scaled(
-            CGRect(
-                x: Self.padZoneBase.minX + CGFloat(column) * Self.padCellSide,
-                y: Self.padZoneBase.minY + CGFloat(row) * Self.padCellSide,
-                width: Self.padCellSide,
-                height: Self.padCellSide
-            )
-        )
-    }
-
-    /// The four diagonal cells of the 3x3 grid are inert, so a slip between up
-    /// and right fires nothing rather than the wrong preset.
-    public var padTargetFrames: [(direction: PadDirection, frame: CGRect)] {
-        PadDirection.allCases.map { ($0, padFrame($0)) }
-    }
-
-    // MARK: - Hit targets
 
     public struct HitTarget: Sendable, Equatable {
         public let name: String
         public let frame: CGRect
         public let zone: Zone
-        /// Sits inside another target by construction; skipped by the overlap check.
+        /// Exempt from the hit-size floor and the overlap sweep: a region inside
+        /// another target rather than a target of its own.
         public let nested: Bool
+
+        public init(name: String, frame: CGRect, zone: Zone, nested: Bool = false) {
+            self.name = name
+            self.frame = frame
+            self.zone = zone
+            self.nested = nested
+        }
     }
 
-    /// Every pointer-hittable element, in zone order. Doubles as a sane default
-    /// keyboard traversal order: agent keys, command keys, pad, dial.
+    // MARK: - Base geometry, in points at regular size
+
+    public static let agentKeyCount = 6
+    public static let columns = 4
+    public static let rows = 4
+
+    /// Chunky, keycap-like. The reference device reads as a dense grid of large
+    /// caps with hairline gaps, not small buttons floating in space.
+    static let unit: CGFloat = 46
+    static let gap: CGFloat = 6
+    static let step: CGFloat = unit + gap
+
+    /// Room for the vertical side legends on the plate.
+    static let plateInsetX: CGFloat = 26
+    /// Top carries the orientation arrow, bottom the "Let's build" legend.
+    static let plateInsetTop: CGFloat = 20
+    static let plateInsetBottom: CGFloat = 26
+    /// The translucent shell around the plate.
+    static let caseInset: CGFloat = 13
+    /// Transparent margin around the shell so the state underglow can bleed
+    /// outside the device the way the reference photographs show. Without it the
+    /// glow would be clipped at the case edge and the whole at-a-glance effect —
+    /// which is ambient light spilling onto the desk, not a lit key — is lost.
+    static let glowBleed: CGFloat = 22
+
+    public static let minimumHitTarget: CGFloat = 28
+
+    /// Floor for any label rendered on the panel. The a11y audit measured real
+    /// label sizes of 6.40–8.00pt once the compact scale was applied, which is
+    /// below what is readable at a glance — and glanceability is the product.
+    public static let minimumFontSize: CGFloat = 9
+
+    /// Derived, not chosen: shrinking the panel clamps here rather than producing
+    /// a sub-28pt key.
+    static let minimumScale: CGFloat = minimumHitTarget / unit
+    static let requestedCompactScale: CGFloat = 0.8
+
+    public let sizeClass: SizeClass
+    public init(sizeClass: SizeClass) { self.sizeClass = sizeClass }
+    public static let regular = PanelLayout(sizeClass: .regular)
+    public static let compact = PanelLayout(sizeClass: .compact)
+
+    public var scale: CGFloat { sizeClass.scale }
+
+    private func s(_ value: CGFloat) -> CGFloat { value * scale }
+
+    // MARK: - Panel and plate
+
+    var gridSize: CGFloat {
+        s(CGFloat(Self.columns) * Self.unit + CGFloat(Self.columns - 1) * Self.gap)
+    }
+
+    /// The shell itself, inset from the panel by the glow bleed.
+    public var caseFrame: CGRect {
+        CGRect(
+            x: s(Self.glowBleed), y: s(Self.glowBleed),
+            width: plateFrame.width + s(Self.caseInset * 2),
+            height: plateFrame.height + s(Self.caseInset * 2)
+        )
+    }
+
+    public var plateFrame: CGRect {
+        CGRect(
+            x: s(Self.glowBleed + Self.caseInset), y: s(Self.glowBleed + Self.caseInset),
+            width: gridSize + s(Self.plateInsetX * 2),
+            height: gridSize + s(Self.plateInsetTop + Self.plateInsetBottom)
+        )
+    }
+
+    public var panelSize: CGSize {
+        CGSize(
+            width: plateFrame.width + s((Self.caseInset + Self.glowBleed) * 2),
+            height: plateFrame.height + s((Self.caseInset + Self.glowBleed) * 2)
+        )
+    }
+
+    public var panelBounds: CGRect { CGRect(origin: .zero, size: panelSize) }
+
+    /// The shell is a soft squarish blob, close to a squircle.
+    public var cornerRadius: CGFloat { s(34) }
+    public var plateCornerRadius: CGFloat { s(24) }
+    public var agentKeyCornerRadius: CGFloat { s(10) }
+    public var commandKeyCornerRadius: CGFloat { s(10) }
+
+    private var gridOrigin: CGPoint {
+        CGPoint(x: plateFrame.minX + s(Self.plateInsetX), y: plateFrame.minY + s(Self.plateInsetTop))
+    }
+
+    /// One grid cell, optionally spanning more than one column.
+    func cell(row: Int, column: Int, columnSpan: Int = 1) -> CGRect {
+        CGRect(
+            x: gridOrigin.x + CGFloat(column) * s(Self.step),
+            y: gridOrigin.y + CGFloat(row) * s(Self.step),
+            width: s(Self.unit) * CGFloat(columnSpan) + s(Self.gap) * CGFloat(columnSpan - 1),
+            height: s(Self.unit)
+        )
+    }
+
+    // MARK: - Agent keys
+
+    /// Row 0 columns 1–2, then all of row 1. Reading order, so key 0 is the
+    /// top-left *agent* key rather than the top-left cell.
+    private static let agentCells: [(row: Int, column: Int)] = [
+        (0, 1), (0, 2), (1, 0), (1, 1), (1, 2), (1, 3),
+    ]
+
+    public var agentKeyFrames: [CGRect] {
+        Self.agentCells.map { cell(row: $0.row, column: $0.column) }
+    }
+
+    /// Traps on a bad index rather than returning `.zero`: a zero frame would draw
+    /// a key silently at the panel origin.
+    public func agentKeyFrame(_ index: Int) -> CGRect {
+        precondition(Self.agentCells.indices.contains(index), "agent key index \(index) out of range")
+        let position = Self.agentCells[index]
+        return cell(row: position.row, column: position.column)
+    }
+
+    // MARK: - Command keys
+
+    private static func commandCell(_ slot: CommandSlot) -> (row: Int, column: Int, span: Int) {
+        switch slot {
+        case .custom1: (2, 0, 1)
+        case .accept: (2, 1, 1)
+        case .reject: (2, 2, 1)
+        case .newSession: (2, 3, 1)
+        case .pushToTalk: (3, 1, 2)   // the wide microphone key
+        case .custom2: (3, 3, 1)
+        }
+    }
+
+    public func commandKeyFrame(_ slot: CommandSlot) -> CGRect {
+        let position = Self.commandCell(slot)
+        return cell(row: position.row, column: position.column, columnSpan: position.span)
+    }
+
+    public var commandKeyFrames: [CGRect] { CommandSlot.allCases.map(commandKeyFrame) }
+
+    /// Bottom-left cell: status LEDs and the small round button. Not a command
+    /// slot — it is an indicator cluster, and nothing dispatches from it.
+    public var statusClusterFrame: CGRect { cell(row: 3, column: 0) }
+
+    // MARK: - Encoder and joystick
+
+    public var dialFrame: CGRect { cell(row: 0, column: 0) }
+
+    /// The encoder's flat top. Concentric inside `dialFrame`, so it is nested.
+    public var dialCenterFrame: CGRect {
+        dialFrame.insetBy(dx: dialFrame.width * 0.28, dy: dialFrame.height * 0.28)
+    }
+
+    public var padZone: CGRect { cell(row: 0, column: 3) }
+
+    /// Gesture regions inside the single stick, not keys. A 46pt cell cannot hold
+    /// five 28pt targets, so these are `nested` and exempt from the floor; the
+    /// stick itself is the focusable target.
+    public func padFrame(_ direction: PadDirection) -> CGRect {
+        let third = padZone.width / 3
+        switch direction {
+        case .up: return CGRect(x: padZone.minX + third, y: padZone.minY, width: third, height: third)
+        case .down: return CGRect(x: padZone.minX + third, y: padZone.maxY - third, width: third, height: third)
+        case .left: return CGRect(x: padZone.minX, y: padZone.minY + third, width: third, height: third)
+        case .right: return CGRect(x: padZone.maxX - third, y: padZone.minY + third, width: third, height: third)
+        case .center: return padZone.insetBy(dx: third, dy: third)
+        }
+    }
+
+    public var padTargetFrames: [(direction: PadDirection, frame: CGRect)] {
+        PadDirection.allCases.map { ($0, padFrame($0)) }
+    }
+
+    // MARK: - Zones
+
+    /// Bounding boxes of logical groups. These overlap by construction — the agent
+    /// keys straddle two rows and therefore enclose the encoder and joystick cells.
+    /// See the type comment; zone disjointness is not an invariant here.
+    public func zoneFrame(_ zone: Zone) -> CGRect {
+        switch zone {
+        case .agents: agentKeyFrames.reduce(CGRect.null) { $0.union($1) }
+        case .commands: commandKeyFrames.reduce(CGRect.null) { $0.union($1) }
+        case .dial: dialFrame
+        case .pad: padZone
+        case .status: statusClusterFrame
+        }
+    }
+
+    public var agentZone: CGRect { zoneFrame(.agents) }
+    public var commandZone: CGRect { zoneFrame(.commands) }
+    public var dialZone: CGRect { zoneFrame(.dial) }
+    public var zoneFrames: [(zone: Zone, frame: CGRect)] { Zone.allCases.map { ($0, zoneFrame($0)) } }
+
+    // MARK: - Hit targets
+
+    /// Every interactive element, in traversal order. The joystick is one entry.
     public var hitTargets: [HitTarget] {
         var targets: [HitTarget] = []
         for (index, frame) in agentKeyFrames.enumerated() {
-            targets.append(HitTarget(name: "agent \(index)", frame: frame, zone: .agents, nested: false))
+            targets.append(HitTarget(name: "agent \(index)", frame: frame, zone: .agents))
         }
-        for (slot, frame) in zip(CommandSlot.allCases, commandKeyFrames) {
-            targets.append(HitTarget(name: "command \(slot.rawValue)", frame: frame, zone: .commands, nested: false))
+        for slot in CommandSlot.allCases {
+            targets.append(HitTarget(name: "command \(slot.rawValue)", frame: commandKeyFrame(slot), zone: .commands))
         }
-        for (direction, frame) in padTargetFrames {
-            targets.append(HitTarget(name: "pad \(direction.rawValue)", frame: frame, zone: .pad, nested: false))
-        }
-        targets.append(HitTarget(name: "dial ring", frame: dialFrame, zone: .dial, nested: false))
+        targets.append(HitTarget(name: "dial ring", frame: dialFrame, zone: .dial))
         targets.append(HitTarget(name: "dial reset", frame: dialCenterFrame, zone: .dial, nested: true))
+        targets.append(HitTarget(name: "joystick", frame: padZone, zone: .pad))
+        // The reference device puts status LEDs in this cell, which makes it the
+        // honest home for the overflow indicator rather than a gap squeezed
+        // between zones — and unlike that gap, it clears the hit floor.
+        targets.append(HitTarget(name: "overflow", frame: statusClusterFrame, zone: .status))
+        for direction in PadDirection.allCases {
+            targets.append(HitTarget(name: "pad \(direction.rawValue)", frame: padFrame(direction),
+                                     zone: .pad, nested: true))
+        }
         return targets
     }
 
-    // MARK: - Invariants
+    // MARK: - Type
 
-    /// Validates the layout invariants at every size class. Empty means healthy.
-    /// Wired into `SelfCheck`; this is the proof the numbers above hold together
-    /// after anyone edits them.
+    /// A base point size scaled for this layout, never below `minimumFontSize`.
+    public func fontSize(_ base: CGFloat) -> CGFloat {
+        max(PanelLayout.minimumFontSize, base * scale)
+    }
+
+    // MARK: - Self check
+
+    /// Validates the invariants at every size class. Empty means healthy.
     public static func selfCheckFailures() -> [String] {
-        // Slack for the float error introduced by scaling; gaps are >= 6pt at
-        // the compact scale, so this can never mask a real collision.
         let epsilon: CGFloat = 0.01
         var failures: [String] = []
+
+        func s_bleed(_ layout: PanelLayout) -> CGFloat { glowBleed * layout.scale }
 
         func describe(_ rect: CGRect) -> String {
             String(format: "(%.1f,%.1f %.1fx%.1f)", rect.minX, rect.minY, rect.width, rect.height)
@@ -361,51 +320,50 @@ public struct PanelLayout: Sendable, Equatable {
             let layout = PanelLayout(sizeClass: sizeClass)
             let tag = sizeClass.rawValue
             let panel = layout.panelBounds.insetBy(dx: -epsilon, dy: -epsilon)
-            let zones = layout.zoneFrames
 
-            for (zone, frame) in zones where !panel.contains(frame) {
-                failures.append(
-                    "\(tag): zone \(zone.rawValue) \(describe(frame)) escapes panel \(describe(layout.panelBounds))"
-                )
+            // The plate must sit inside the shell, and every cell inside the plate.
+            if !panel.contains(layout.caseFrame) {
+                failures.append("\(tag): case \(describe(layout.caseFrame)) escapes panel")
+            }
+            if !layout.caseFrame.insetBy(dx: -epsilon, dy: -epsilon).contains(layout.plateFrame) {
+                failures.append("\(tag): plate \(describe(layout.plateFrame)) escapes the case")
+            }
+            // The glow needs real room on every side or it clips.
+            if layout.caseFrame.minX < s_bleed(layout) - epsilon {
+                failures.append("\(tag): no glow bleed margin on the left")
+            }
+            let plate = layout.plateFrame.insetBy(dx: -epsilon, dy: -epsilon)
+            for target in layout.hitTargets where !plate.contains(target.frame) {
+                failures.append("\(tag): \(target.name) \(describe(target.frame)) escapes the plate")
             }
 
-            for (index, first) in zones.enumerated() {
-                for second in zones[(index + 1)...]
-                where first.frame.insetBy(dx: epsilon, dy: epsilon)
-                    .intersects(second.frame.insetBy(dx: epsilon, dy: epsilon)) {
-                    failures.append("\(tag): zones \(first.zone.rawValue) and \(second.zone.rawValue) overlap")
-                }
-            }
-
-            let targets = layout.hitTargets
-
-            for target in targets {
-                let zone = layout.zoneFrame(target.zone).insetBy(dx: -epsilon, dy: -epsilon)
-                if !zone.contains(target.frame) {
-                    failures.append(
-                        "\(tag): \(target.name) \(describe(target.frame)) escapes zone \(target.zone.rawValue)"
-                    )
-                }
-                if min(target.frame.width, target.frame.height) < minimumHitTarget - epsilon {
-                    failures.append(
-                        "\(tag): \(target.name) is \(describe(target.frame)), under the \(minimumHitTarget)pt hit floor"
-                    )
-                }
-            }
-
-            let sweepable = targets.filter { !$0.nested }
+            // Deliberately NOT checking zone-vs-zone overlap: zones are logical
+            // bounding boxes and the agent group encloses the encoder and stick.
+            // The real invariant is that no two interactive targets collide.
+            let sweepable = layout.hitTargets.filter { !$0.nested }
             for (index, first) in sweepable.enumerated() {
                 for second in sweepable[(index + 1)...]
                 where first.frame.insetBy(dx: epsilon, dy: epsilon)
                     .intersects(second.frame.insetBy(dx: epsilon, dy: epsilon)) {
                     failures.append("\(tag): \(first.name) overlaps \(second.name)")
                 }
+                if min(first.frame.width, first.frame.height) < minimumHitTarget - epsilon {
+                    failures.append(
+                        "\(tag): \(first.name) is \(describe(first.frame)), under the \(minimumHitTarget)pt hit floor"
+                    )
+                }
             }
 
-            // Every label base size used by the components, routed through the
-            // clamp. A regression here means text went unreadable at compact.
+            // Nested regions must actually sit inside a real target.
+            for nested in layout.hitTargets where nested.nested {
+                let enclosing = sweepable.first { $0.frame.insetBy(dx: -epsilon, dy: -epsilon).contains(nested.frame) }
+                if enclosing == nil {
+                    failures.append("\(tag): nested \(nested.name) is not inside any target")
+                }
+            }
+
             for base in [8, 9, 10, 14] as [CGFloat] where layout.fontSize(base) < minimumFontSize {
-                failures.append("\(tag): base \(base)pt label resolves to \(layout.fontSize(base))pt, under the \(minimumFontSize)pt floor")
+                failures.append("\(tag): base \(base)pt resolves to \(layout.fontSize(base))pt, under the floor")
             }
 
             if layout.agentKeyFrames.count != agentKeyCount {
@@ -413,6 +371,12 @@ public struct PanelLayout: Sendable, Equatable {
             }
             if layout.commandKeyFrames.count != CommandSlot.allCases.count {
                 failures.append("\(tag): command key frames do not cover every CommandSlot")
+            }
+            // The device is square-ish; a wildly non-square panel means the grid
+            // maths drifted from the reference.
+            let ratio = layout.panelSize.width / layout.panelSize.height
+            if ratio < 0.9 || ratio > 1.2 {
+                failures.append("\(tag): panel aspect \(String(format: "%.2f", ratio)) is not close to square")
             }
         }
 
