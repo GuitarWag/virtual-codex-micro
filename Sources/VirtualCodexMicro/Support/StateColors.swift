@@ -133,6 +133,15 @@ public enum StateColors {
         /// Text and icon colour, legible on `composedKeyFill`.
         public let keyLabel: RGB
         /// Halo colour. Carries the state at a glance; never the only signal.
+        ///
+        /// Its luminance is pegged one small step above its own `keyFill`, so the
+        /// glows form the same ladder the fills do. That is not decoration: the
+        /// key draws this as a fat blurred inner border covering most of the face
+        /// (`AgentKeyView`), so a set of glows at one luminance repaints the
+        /// ladder flat no matter how well separated the fills are. The glows used
+        /// to be exactly that — bright saturated variants within 1.1:1 of each
+        /// other — which is why the rendered keys measured 1.05:1 apart while the
+        /// fills measured further. Hue is the state's own; only lightness moved.
         public let stateGlow: RGB
         /// Border stroke colour.
         public let keyEdge: RGB
@@ -198,7 +207,7 @@ public enum StateColors {
                 darkFill: RGB(0xE4E4E8), darkLabel: RGB(0x141418),
                 lightContrastFill: RGB(0xACACAC), lightContrastLabel: RGB(0x000000),
                 darkContrastFill: RGB(0xD3D3D3), darkContrastLabel: RGB(0x000000),
-                lightGlow: RGB(0xFFFFFF), darkGlow: RGB(0xFFFFFF),
+                lightGlow: RGB(0xB9B9B9), darkGlow: RGB(0xD4D4D4),
                 restingFillOpacity: 0.85, restingGlowOpacity: 0.55, restingGlowRadius: 9
             )
 
@@ -211,7 +220,7 @@ public enum StateColors {
                 darkFill: RGB(0x0D2C63), darkLabel: RGB(0xFFFFFF),
                 lightContrastFill: RGB(0x01429C), lightContrastLabel: RGB(0xFFFFFF),
                 darkContrastFill: RGB(0x00317A), darkContrastLabel: RGB(0xFFFFFF),
-                lightGlow: RGB(0x2E7BFF), darkGlow: RGB(0x4A90FF),
+                lightGlow: RGB(0x0046BD), darkGlow: RGB(0x00317F),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.75, restingGlowRadius: 12
             )
 
@@ -225,7 +234,7 @@ public enum StateColors {
                 darkFill: RGB(0x4DD384), darkLabel: RGB(0x0D351D),
                 lightContrastFill: RGB(0x00B254), lightContrastLabel: RGB(0x002A14),
                 darkContrastFill: RGB(0x3ACF77), darkContrastLabel: RGB(0x000000),
-                lightGlow: RGB(0x25A55C), darkGlow: RGB(0x3ED27C),
+                lightGlow: RGB(0x2ABD6A), darkGlow: RGB(0x38D178),
                 restingFillOpacity: 0.90, restingGlowOpacity: 0.70, restingGlowRadius: 10
             )
 
@@ -240,7 +249,7 @@ public enum StateColors {
                 darkFill: RGB(0xFCF6EC), darkLabel: RGB(0x201502),
                 lightContrastFill: RGB(0xFEC76E), lightContrastLabel: RGB(0x000000),
                 darkContrastFill: RGB(0xFFF2D6), darkContrastLabel: RGB(0x000000),
-                lightGlow: RGB(0xFFB44A), darkGlow: RGB(0xFFC15C),
+                lightGlow: RGB(0xFFD8A2), darkGlow: RGB(0xFFF3E1),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.85, restingGlowRadius: 13
             )
 
@@ -255,7 +264,7 @@ public enum StateColors {
                 darkFill: RGB(0xDE5766), darkLabel: RGB(0x140406),
                 lightContrastFill: RGB(0xDE0015), lightContrastLabel: RGB(0xFFFFFF),
                 darkContrastFill: RGB(0xFE2F42), darkContrastLabel: RGB(0x000000),
-                lightGlow: RGB(0xE83A4C), darkGlow: RGB(0xFF5566),
+                lightGlow: RGB(0xE6273B), darkGlow: RGB(0xFF3145),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.85, restingGlowRadius: 13
             )
 
@@ -275,7 +284,7 @@ public enum StateColors {
                 darkFill: RGB(0x565664), darkLabel: RGB(0xFFFFFF),
                 lightContrastFill: RGB(0x1C1C21), lightContrastLabel: RGB(0xFFFFFF),
                 darkContrastFill: RGB(0x5B5B69), darkContrastLabel: RGB(0xFFFFFF),
-                lightGlow: RGB(0x9A9AA8), darkGlow: RGB(0xB0B0BE),
+                lightGlow: RGB(0x27272E), darkGlow: RGB(0x5B5B6E),
                 restingFillOpacity: 0.94, restingGlowOpacity: 0.60, restingGlowRadius: 8
             )
         }
