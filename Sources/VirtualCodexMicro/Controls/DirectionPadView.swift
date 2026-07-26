@@ -110,6 +110,20 @@ public struct DirectionPadView: View {
 
     @State private var hovered: PanelLayout.PadDirection?
     @FocusState private var focused: PanelLayout.PadDirection?
+    /// Reduce Transparency: the a11y audit found this material ungated, leaving
+    /// the panel with two policies for one requirement. AppKit's automatic
+    /// NSVisualEffectView substitution might cover it, but that is untested and
+    /// fails silently, so gate it explicitly like the key views already do.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
+
+    /// Solid fill keeps the live-versus-inert distinction legible without relying
+    /// on implicit substitution. Inert cells were already opaque `.quaternary`.
+    private func cellFill(live: Bool) -> AnyShapeStyle {
+        guard live else { return AnyShapeStyle(.quaternary) }
+        return reduceTransparency
+            ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+            : AnyShapeStyle(.ultraThinMaterial)
+    }
 
     /// - Parameters:
     ///   - presets: direction to preset. Any entry for `.center` is ignored —
@@ -164,7 +178,12 @@ public struct DirectionPadView: View {
         }
         .frame(width: frame.width, height: frame.height)
         .contentShape(shape)
-        .offset(x: frame.minX - layout.padZone.minX, y: frame.minY - layout.padZone.minY)
+        // `.position`, not `.offset`: offset does not participate in layout, so the
+        // enclosing ZStack sized itself to one 36pt cell and `.frame` then centred
+        // that stack, shifting every cell by exactly one cell diagonally. The pure
+        // hit-testing maths stayed correct, so pixels and clicks disagreed — the
+        // offscreen render caught it, no per-component check could.
+        .position(x: frame.midX - layout.padZone.minX, y: frame.midY - layout.padZone.minY)
         // Hover reveals what the key is bound to. An unbound key still answers
         // the hover, saying why nothing will happen.
         .help(tooltip(direction))

@@ -397,18 +397,18 @@ public struct AgentKeyView: View {
         VStack(alignment: .leading, spacing: 0) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Text("\(index + 1)")
-                    .font(.system(size: side * 0.19, weight: .semibold).monospacedDigit())
+                    .font(.system(size: max(PanelLayout.minimumFontSize, side * 0.19), weight: .semibold).monospacedDigit())
                     .opacity(p.motif == .emptySlot ? 0.55 : 0.85)
                 Spacer(minLength: 0)
                 Image(systemName: Self.iconName(for: state))
                     .font(.system(
-                        size: side * 0.2,
+                        size: max(PanelLayout.minimumFontSize, side * 0.2),
                         weight: p.motif == .lostTrack ? .black : .semibold
                     ))
             }
             Spacer(minLength: 0)
             Text(state.label)
-                .font(.system(size: side * 0.175, weight: .medium))
+                .font(.system(size: max(PanelLayout.minimumFontSize, side * 0.175), weight: .medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.65)
                 .frame(maxWidth: .infinity, alignment: .leading)

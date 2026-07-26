@@ -4,10 +4,6 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-016] **Accessibility pass** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-21`
-  > Every key reachable and actuatable by keyboard with a predictable order across the four zones. VoiceOver labels that state role, binding and current status. Every colour state paired with text, icon or pulse so status never depends on hue alone. Reduce Motion disables pulse and glow animation; Reduce Transparency swaps frosted materials for solid fills with defined edges. Labels must stay legible at the compact panel size. Non-negotiable scope — this is the accessibility floor, not polish.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-017] **M1 exit review: recognisability and restraint** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-23`
   > Review the prototype against the reference control map and against the PRD's own risk of overfitting to mimicry. Confirm someone familiar with the hardware recognises the structure immediately, that labels and hit targets survived the fidelity push, and that nothing in the visuals or copy reads as an official product. Written go/no-go before M2 starts.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-005] **M0: record architecture and distribution decisions** `priority:critical` `assignee:claude` `tags:m0,spike` `due:2026-08-02`
   > Close the PRD open questions with written decisions: Claude Code as first-class v1 backend; owned-vs-observed session split with capability gating; direct notarized distribution rather than App Store (sandbox cannot host PTY spawning plus ~/.claude reads plus Automation); replica fidelity as zone-and-order faithful with pointer-optimised proportions. Add the seventh `unknown` visual state to the state model, distinct from `unassigned`. Blocks M1 — the layout and the key component both depend on the final state list.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-016] **Accessibility pass** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-21`
+  > Every key reachable and actuatable by keyboard with a predictable order across the four zones. VoiceOver labels that state role, binding and current status. Every colour state paired with text, icon or pulse so status never depends on hue alone. Reduce Motion disables pulse and glow animation; Reduce Transparency swaps frosted materials for solid fills with defined edges. Labels must stay legible at the compact panel size. Non-negotiable scope — this is the accessibility floor, not polish.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

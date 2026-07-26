@@ -237,9 +237,9 @@ public struct CommandKeyView: View {
 
         return VStack(spacing: 1 * layout.scale) {
             Image(systemName: Self.iconName(for: slot))
-                .font(.system(size: 14 * layout.scale, weight: .regular))
+                .font(.system(size: layout.fontSize(14), weight: .regular))
             Text(Self.keyLabel(for: slot))
-                .font(.system(size: 8 * layout.scale, weight: .medium))
+                .font(.system(size: layout.fontSize(8), weight: .medium))
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }

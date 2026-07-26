@@ -72,6 +72,23 @@ public struct PanelLayout: Sendable, Equatable {
     /// class. A key too small to click reliably defeats the point of the panel.
     public static let minimumHitTarget: CGFloat = 28
 
+    /// Floor for any label rendered on the panel. The a11y audit measured real
+    /// label sizes of 6.40–8.00pt once the compact scale was applied, which is
+    /// below what is readable at a glance — and glanceability is the product.
+    ///
+    /// This lives here rather than at each call site for the same reason
+    /// `minimumScale` does: one definition that every consumer routes through,
+    /// so a future scale change cannot quietly shrink text again. Call
+    /// `fontSize(_:)` instead of multiplying by `scale` yourself.
+    public static let minimumFontSize: CGFloat = 9
+
+    /// A base point size scaled for this layout, never dropping below
+    /// `minimumFontSize`. Text stops shrinking before it stops being readable;
+    /// the panel has label width to spare, so the clamp costs layout nothing.
+    public func fontSize(_ base: CGFloat) -> CGFloat {
+        max(PanelLayout.minimumFontSize, base * scale)
+    }
+
     /// Smallest interactive element at base scale (one pad cell). The compact
     /// scale is clamped against this rather than trusted, so nudging
     /// `requestedCompactScale` down can shrink the panel but can never produce a
@@ -383,6 +400,12 @@ public struct PanelLayout: Sendable, Equatable {
                     .intersects(second.frame.insetBy(dx: epsilon, dy: epsilon)) {
                     failures.append("\(tag): \(first.name) overlaps \(second.name)")
                 }
+            }
+
+            // Every label base size used by the components, routed through the
+            // clamp. A regression here means text went unreadable at compact.
+            for base in [8, 9, 10, 14] as [CGFloat] where layout.fontSize(base) < minimumFontSize {
+                failures.append("\(tag): base \(base)pt label resolves to \(layout.fontSize(base))pt, under the \(minimumFontSize)pt floor")
             }
 
             if layout.agentKeyFrames.count != agentKeyCount {

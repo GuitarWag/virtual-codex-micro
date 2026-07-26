@@ -208,6 +208,11 @@ public struct DialView: View {
     @FocusState private var isFocused: Bool
 
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    // Reduce Transparency: the a11y audit found this file rendered two materials
+    // while reading neither setting, leaving the panel with two policies for one
+    // requirement. AppKit's automatic NSVisualEffectView substitution may cover
+    // it, but relying on that is untested and silent when it fails.
+    @Environment(\.accessibilityReduceTransparency) private var reduceTransparency
 
     public init(layout: PanelLayout, scale: DialScale = .effort, stepIndex: Binding<Int>) {
         self.layout = layout
@@ -229,7 +234,9 @@ public struct DialView: View {
 
     public var body: some View {
         ZStack {
-            Circle().fill(.ultraThinMaterial)
+            Circle().fill(reduceTransparency
+                ? AnyShapeStyle(Color(nsColor: .windowBackgroundColor))
+                : AnyShapeStyle(.ultraThinMaterial))
             Circle().strokeBorder(.quaternary, lineWidth: 1)
             notches
             pointer
@@ -309,11 +316,13 @@ public struct DialView: View {
 
     private var knob: some View {
         ZStack {
-            Circle().fill(.regularMaterial)
+            Circle().fill(reduceTransparency
+                ? AnyShapeStyle(Color(nsColor: .controlBackgroundColor))
+                : AnyShapeStyle(.regularMaterial))
             Circle().strokeBorder(.quaternary, lineWidth: 1)
             knurl
             Text(currentLabel)
-                .font(.system(size: max(8, knobDiameter * 0.24), weight: .semibold, design: .rounded))
+                .font(.system(size: max(PanelLayout.minimumFontSize, knobDiameter * 0.24), weight: .semibold, design: .rounded))
                 .lineLimit(1)
                 .minimumScaleFactor(0.55)
                 .foregroundStyle(.primary)
