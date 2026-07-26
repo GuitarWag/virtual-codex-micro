@@ -64,6 +64,20 @@ enum SelfCheck {
         failures += OnboardingView.selfCheckFailures().map { "onboarding: \($0)" }
         failures += OwnedSession.selfCheckFailures().map { "owned: \($0)" }
         failures += DeviceChrome.selfCheckFailures().map { "chrome: \($0)" }
+        failures += MenuBarItem.selfCheckFailures().map { "menubar: \($0)" }
+
+        // Opt-in, and deliberately not part of the default pass: it renders a cap
+        // per state per appearance through NSHostingView and reads the pixels
+        // back, so it needs an NSWindow and it depends on font rasterisation.
+        // Everything above is pure and instant, and that is worth keeping.
+        // `Scripts/verify.sh` sets the variable, so CI still measures what the
+        // user actually sees. Full argument in PixelCheck.
+        //   VCM_SELFTEST=1 VCM_PIXELCHECK=1 ./.build/debug/VirtualCodexMicro
+        //   VCM_SELFTEST=1 VCM_PIXELCHECK=report ...   also prints every ratio
+        if let mode = ProcessInfo.processInfo.environment["VCM_PIXELCHECK"] {
+            if mode == "report" { print(PixelCheck.report()) }
+            failures += PixelCheck.failures().map { "pixels: \($0)" }
+        }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

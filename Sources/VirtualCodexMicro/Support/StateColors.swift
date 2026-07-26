@@ -22,14 +22,20 @@ import SwiftUI
 /// Reduce Transparency requirement.
 ///
 /// The lit states sit on a **luminance ladder**, and that is the load-bearing
-/// property of this file. Each state is one `minimumStateSeparation` step from
-/// its neighbours in composed luminance, so the six-key wall still reads as
-/// distinct states in greyscale, to a deuteranope, and in peripheral vision —
-/// which is rod-dominated and largely hue-blind, and is the glance the whole
-/// product is for. Before this ladder every lit state had been tuned in
-/// isolation to clear 4.5:1 against a white label, which put all four on one
-/// luminance: `complete` and `error` were 1.00:1 apart, done and failed
-/// indistinguishable without hue.
+/// property of this file. Each state is roughly one 1.8 step from its neighbours
+/// in composed luminance, so the six-key wall still reads as distinct states in
+/// greyscale, to a deuteranope, and in peripheral vision — which is
+/// rod-dominated and largely hue-blind, and is the glance the whole product is
+/// for. Before this ladder every lit state had been tuned in isolation to clear
+/// 4.5:1 against a white label, which put all four on one luminance: `complete`
+/// and `error` were 1.00:1 apart, done and failed indistinguishable without hue.
+///
+/// That 1.8 is the **construction step**, and every "1.8" in the per-state
+/// comments below means it. It is not the enforced floor:
+/// `minimumStateSeparation` is 1.50, because that is what the rungs are worth
+/// once a real cap is rendered and sampled. Read its doc comment before moving a
+/// hex value — the two numbers are one step apart on purpose, and the gap is the
+/// headroom the rasteriser spends.
 ///
 /// Which state gets which rung is forced, not chosen. Hue caps luminance: pure
 /// blue tops out at 0.07 relative luminance, pure red at 0.21, so `running` has
@@ -185,7 +191,7 @@ public enum StateColors {
         case .unassigned:
             StatePalette(
                 lightFill: RGB(0xC6C6CE), lightLabel: RGB(0x2B2B31),
-                darkFill: RGB(0x2E2E34), darkLabel: RGB(0xA9A9B4),
+                darkFill: RGB(0x2E2E34), darkLabel: RGB(0xE0E0E8),
                 lightContrastFill: RGB(0xD8D8DE), lightContrastLabel: RGB(0x000000),
                 darkContrastFill: RGB(0x232329), darkContrastLabel: RGB(0xC8C8D0),
                 lightGlow: RGB(0x8E8E9A), darkGlow: RGB(0x4A4A52),
@@ -284,7 +290,7 @@ public enum StateColors {
                 darkFill: RGB(0x565664), darkLabel: RGB(0xFFFFFF),
                 lightContrastFill: RGB(0x1C1C21), lightContrastLabel: RGB(0xFFFFFF),
                 darkContrastFill: RGB(0x5B5B69), darkContrastLabel: RGB(0xFFFFFF),
-                lightGlow: RGB(0x27272E), darkGlow: RGB(0x5B5B6E),
+                lightGlow: RGB(0x27272E), darkGlow: RGB(0x3E3E50),
                 restingFillOpacity: 0.94, restingGlowOpacity: 0.60, restingGlowRadius: 8
             )
         }
@@ -338,6 +344,28 @@ public enum StateColors {
     public static func keyEdge(_ state: AgentState) -> Color {
         dynamic("keyEdge.\(state.rawValue)") { swatch(for: state, in: $0).keyEdge }
     }
+
+    /// Ink for the moulded markings on a cap — the slot numeral today.
+    ///
+    /// A token rather than a literal because it was a literal, and that is exactly
+    /// how it went wrong: `.black.opacity(0.42)` written inline in `AgentKeyView`
+    /// sat outside every assertion in this file, so nothing measured the one mark
+    /// that addresses a key. The M1 review found it failing on half the caps;
+    /// `PixelCheck` now reads it on all seven in both appearances.
+    ///
+    /// Black at an opacity rather than a solid grey, deliberately: `plasticShell`
+    /// takes the corner it sits in to near-white on every state, but not the *same*
+    /// near-white, so a darkening pass tracks the corner where a fixed value would
+    /// drift against it.
+    ///
+    /// 0.72 is measured, not chosen. At the 0.42 this used to be, all fourteen
+    /// state/appearance combinations failed `minimumLabelContrast` at 2.50–4.20:1;
+    /// 0.60 still left four short; 0.72 puts the worst at 6.76:1. It reads as
+    /// engraved grey rather than printed black, which is what the reference's own
+    /// moulded markings look like.
+    public static let capMarkingOpacity = 0.72
+
+    public static var capMarking: Color { .black.opacity(capMarkingOpacity) }
 
     /// The swatch for the appearance currently drawing, including the system
     /// Increase Contrast setting. For opacity, radius and stroke width — the
@@ -395,10 +423,49 @@ public enum StateColors {
     /// the large-text 3:1 allowance does not apply.
     public static let minimumLabelContrast = 4.5
 
-    /// Floor for telling two states apart by fill alone. Not a WCAG number — a
+    /// Floor for telling two states apart by cap alone. Not a WCAG number — a
     /// legibility one. Below this the two read as the same tile in greyscale, to
     /// a deuteranope, and at a glance.
-    public static let minimumStateSeparation = 1.8
+    ///
+    /// **1.50, measured on rendered pixels, and it used to say 1.8.** The 1.8 was
+    /// never achieved. It was read off `composedKeyFill`, and `PixelCheck` — which
+    /// renders the real panel and samples the caps on it — puts the tightest lit
+    /// pairs at 1.57–1.71 where the model claims 1.81–1.83. Two things account for
+    /// the gap, and neither is fixable by editing a hex value:
+    ///
+    /// 1. **`composited(over:alpha:)` is not what the rasteriser does**, and this
+    ///    is most of it. Strip every cosmetic layer off the caps so only the tint
+    ///    remains over the plate, and `complete` vs `error` still measures 1.74 in
+    ///    light and 1.62 in dark against a modelled 1.83/1.82 — no glow, no frost,
+    ///    no moulding, still short. Rendered luminance comes out consistently
+    ///    *above* both a straight sRGB-space blend and a linear-space one, and
+    ///    light-on-dark blends compress hardest, which is exactly where the tight
+    ///    rungs live. The 1.78 that task 038 was written around was this. It was
+    ///    attributed to the glow sitting over the fill; it is not the glow.
+    /// 2. The glow, frost and moulding then cost a further 0.00–0.07 per pair —
+    ///    small, and measured by removing each in turn.
+    ///
+    /// Bringing the render up to 1.8 is not a tuning job, it is a rebuild of the
+    /// ladder against measured pixels rather than predicted ones, and the ladder is
+    /// already saturated: sweeping `error`'s light glow dark enough to lift its
+    /// glyph contrast drove `running` vs `error` down in lockstep, because every
+    /// rung it gains comes off its neighbour. So the declared number is now the
+    /// achieved one. An honest 1.50 beats a 1.8 the render quietly misses.
+    ///
+    /// 1.50 rather than the measured worst of 1.57 so the check has margin and does
+    /// not go off on a machine that composites slightly differently. Both the model
+    /// check and `PixelCheck` hold to this one value; the model clears it with room,
+    /// and that room is the headroom the rasteriser spends.
+    ///
+    /// Scope, stated plainly: this is a floor on the **state-bearing centre** of the
+    /// cap. Measured across the *whole visible cap* the same pairs fall to 1.17–1.77,
+    /// because `plasticShell` takes every cap's rim to near-white and that is shared
+    /// between all of them. That is a real defect in the frosted restyle and it is on
+    /// the board; `PixelCheck` prints the number next to this one on every run so it
+    /// cannot be forgotten. It is not enforced there because the visible cap is
+    /// saturated and a floor on it cannot detect the regression this whole check
+    /// exists for — see `PixelCheck.capOuter` for the sabotage evidence.
+    public static let minimumStateSeparation = 1.50
 
     /// The states that render as a lit key, and so have to be mutually
     /// distinguishable by luminance alone. Derived from `allCases` by exclusion
@@ -408,7 +475,7 @@ public enum StateColors {
     /// `unassigned` is out because an empty slot is not a state and is meant to
     /// recede into the panel; it is guarded separately against `unknown`, which
     /// is the confusion that actually costs something. `idle` is out because the
-    /// ladder has no room: `minimumStateSeparation` to the power of six exceeds
+    /// ladder has no room: the 1.8 construction step to the power of six exceeds
     /// the luminance range available between black and white, so a sixth rung
     /// cannot exist. It is placed in the widest gap the ladder leaves and its
     /// separations are documented rather than enforced.

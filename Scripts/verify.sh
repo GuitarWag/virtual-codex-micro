@@ -23,7 +23,13 @@ fi
 echo "    build ok"
 
 echo "==> self-check"
-VCM_SELFTEST=1 ./.build/debug/VirtualCodexMicro
+# VCM_PIXELCHECK adds the rendered-pixel colour pass: it renders a real agent cap
+# per state and measures glyph contrast and lit-pair separation off the bitmap,
+# which is the only way to see a regression caused by a layer drawn over the fill.
+# It is opt-in because it needs an NSWindow and depends on the rasteriser, so the
+# bare `VCM_SELFTEST=1` run stays pure — but it belongs here, because otherwise
+# nothing in CI ever measures what the user actually sees. See PixelCheck.swift.
+VCM_SELFTEST=1 VCM_PIXELCHECK=1 ./.build/debug/VirtualCodexMicro
 
 if [ "${1:-}" != "--no-render" ]; then
     echo "==> render comparison"

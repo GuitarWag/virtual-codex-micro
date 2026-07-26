@@ -427,14 +427,25 @@ public struct AgentKeyView: View {
     ///   brightness in an annulus, copying the moulded stem disc visible in the
     ///   photographs, and it came out a bullseye.
     /// - **Clear at the centre out to r≈0.19·side**, which clears a 17pt glyph.
-    ///   That is the ladder's and the label's protection, and it is not slack:
-    ///   `StateColors` measures both the 1.8 pairwise floor and the 4.5:1 label
-    ///   contrast on `composedKeyFill`, i.e. on the middle of the face, and the
-    ///   rendered stack has essentially no headroom there — the lit pairs
-    ///   composite 1.78–1.87 apart before any white is added. White over the
-    ///   centre would have closed the ladder, because near-black luminance moves
-    ///   fastest per unit of white. White outside the glyph costs it nothing, so
-    ///   the frost lives entirely in the band between the glyph and the edge.
+    ///   That is the ladder's and the label's protection, and it is not slack.
+    ///   `PixelCheck` samples the ring from 0.21 to 0.26·side — just outside the
+    ///   glyph, just inside the frost — and measures the tightest lit pairs at
+    ///   1.57–1.71 there. White over the centre would close the ladder outright,
+    ///   because near-black luminance moves fastest per unit of white: a full-face
+    ///   frost was tried and it took those pairs to 1.26–1.46 and `error`'s glyph
+    ///   to 2.31:1.
+    ///
+    ///   This bullet used to end "White outside the glyph costs it nothing", and
+    ///   the M1 review was right to call that out — it is measurably false. It
+    ///   costs the *centre* almost nothing, which is what the sentence was
+    ///   reasoning about: stripping every cosmetic layer lifts `complete` vs
+    ///   `error` only from 1.67 to 1.74 there. But measured across the whole
+    ///   visible cap, where the frost is the majority of the area, the same pairs
+    ///   read 1.17–1.77 — this ramp is most of why, and no floor is enforced there
+    ///   because none could honestly be met. So: white outside the glyph is what
+    ///   makes the cap read as lit plastic, and it costs the cap's glanceable
+    ///   luminance ladder a great deal. Both halves are true and the second one
+    ///   is on the board.
     ///
     /// The corners sit past the last stop and take the whitest value, which is
     /// what the corner highlights on a real cap do, so the rounded square gets an
@@ -569,7 +580,15 @@ public struct AgentKeyView: View {
                     size: layout.fontSize(17),
                     weight: p.motif == .lostTrack ? .bold : .regular
                 ))
-                .opacity(p.motif == .emptySlot ? 0.6 : 0.92)
+                // One opacity for every state, including `emptySlot`. It used to
+                // fade the empty slot's mark to 0.6 so the slot would recede, and
+                // `PixelCheck` measured what that actually cost: 2.78:1 in light
+                // and 2.85:1 in dark against a 4.5 floor, on the only mark the
+                // slot carries. The model check could not see it, because the
+                // model does not know the glyph is drawn translucent. "Empty" is
+                // still said three other ways — dashed edge, unlit fill, no halo —
+                // and none of them is a contrast failure.
+                .opacity(0.92)
             // Dark ink rather than `keyLabel`, and not by preference. The number
             // sits in the corner, which is the one part of the face the frost
             // takes to near-white on every state and in both appearances — so a
@@ -577,9 +596,14 @@ public struct AgentKeyView: View {
             // and lose it. Engraved-grey is what the reference's own moulded
             // markings are, and unlike `keyLabel` it is legible against the
             // corner rather than against the centre `StateColors` measures.
+            //
+            // `StateColors.capMarking`, not a literal. It was a literal, which is
+            // why it spent this long failing 4.5:1 on half the caps with nothing
+            // to notice: a colour written inline here is a colour no check in
+            // StateColors can reach. `PixelCheck` measures it now.
             Text("\(index + 1)")
                 .font(.system(size: layout.fontSize(9), weight: .semibold).monospacedDigit())
-                .foregroundStyle(.black.opacity(0.42))
+                .foregroundStyle(StateColors.capMarking)
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
         .foregroundStyle(swatch.keyLabel.color)
