@@ -4,10 +4,6 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-025] **Wire command keys with capability gating** `priority:high` `assignee:claude` `tags:m2,backend,ui` `due:2026-09-18`
-  > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-034] **Ship: notarized build, updates, idle click-through, legal pass** `priority:medium` `assignee:claude` `tags:m4,ship` `due:2026-11-15`
   > Partly blocked on tooling: notarytool and stapler ship with Xcode, which is not installed, so notarization cannot be completed in this environment — installing Xcode is a prerequisite for this task, and Scripts/bundle.sh currently ad-hoc signs instead. Scope: notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-023] **Claude Code adapter: owned sessions under PTY** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-09-13`
   > Spawn and supervise sessions the app owns. The M0 spike settled the mechanism, so these are now requirements rather than choices: use forkpty, NOT openpty plus Foundation Process (Process gives no hook between fork and exec, so the pty never becomes the controlling terminal and every child is a guaranteed orphan); keep a reader draining the pty master for the life of every child or it blocks in write() and looks hung; tear down with killpg then SIGKILL on a timeout, because the pty hangup leaked once in 66 runs and never reaches SIGHUP-ignoring grandchildren like MCP servers or language servers. DECIDED: owned sessions run a VISIBLE TUI (not headless stream-json), because the PRD's non-goal is not replacing the terminal and the hook spike removed the reason injection was unsafe. Sequence: PermissionRequest hook fires at 1ms -> key amber -> user presses accept -> keystroke injected into the PTY -> PostToolUse confirms -> key returns to running. Detection comes from hooks, never from scraped text. HARD REQUIREMENT on the reject path: PermissionDenied never fired in 12 spike sessions, so there is no proven signal a rejection landed. After injecting, wait for a confirming event within a bounded window and drive the key to `unknown` if none arrives. An unconfirmed reject must NEVER be reported as done. Spawn with --settings pointing at our own hook file, which gives full hook coverage with zero writes to the user's ~/.claude/settings.json. Untested and still open: six concurrent children, sleep/wake, SIGWINCH resize, and a startup sweep for strays from a previous crash.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-025] **Wire command keys with capability gating** `priority:high` `assignee:claude` `tags:m2,backend,ui` `due:2026-09-18`
+  > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

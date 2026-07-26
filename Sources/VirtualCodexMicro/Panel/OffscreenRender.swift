@@ -20,13 +20,12 @@ enum OffscreenRender {
                                          ("dark", NSAppearance.Name.darkAqua)] {
             let layout = PanelLayout.regular
             let view = PanelRootView(
-                layout: layout,
-                states: demoStates,
-                sessions: demoSessions,
-                capabilities: .observed,   // shows the disabled command treatment
-                canSpawnSessions: true,
-                onAgentKey: { _ in }, onCommand: { _ in },
-                onPreset: { _ in }, onOpenChooser: {}
+                coordinator: .demo(
+                    states: demoStates(suffix),
+                    sessions: demoSessions(suffix),
+                    capabilities: .observed   // shows the disabled command treatment
+                ),
+                layout: layout
             )
 
             let host = NSHostingView(rootView: view)
@@ -64,19 +63,34 @@ enum OffscreenRender {
         exit(0)
     }
 
-    /// One of each interesting state, so a render doubles as a visual state chart.
-    private static let demoStates: [Int: AgentState] = [
-        0: .running, 1: .needsInput, 2: .complete,
-        3: .error, 4: .unknown, 5: .unassigned
-    ]
+    /// One of each state, so a render doubles as a visual state chart.
+    ///
+    /// There are seven states and six slots, so the pair takes slot 5 between
+    /// them: `idle` in light and `unassigned` in dark. `idle` was missing from
+    /// this set entirely, which meant the state measuring worst against the light
+    /// panel was the one the review artifact could not show — and light is
+    /// exactly the appearance where it fails. `unassigned` is unchanged and is
+    /// meant to recede, so dark is the cheaper place to look at it.
+    private static func demoStates(_ appearance: String) -> [Int: AgentState] {
+        [0: .running, 1: .needsInput, 2: .complete, 3: .error, 4: .unknown,
+         5: appearance == "light" ? .idle : .unassigned]
+    }
 
-    private static let demoSessions: [Int: AgentSession] = [
-        0: AgentSession(id: "d0", backendID: "demo", title: "api refactor", repoPath: "~/work/api", branch: "main", state: .running),
-        1: AgentSession(id: "d1", backendID: "demo", title: "flaky test", repoPath: "~/work/api", branch: "fix/flake", state: .needsInput),
-        2: AgentSession(id: "d2", backendID: "demo", title: "changelog", repoPath: "~/work/docs", branch: "main", state: .complete),
-        3: AgentSession(id: "d3", backendID: "demo", title: "migration", repoPath: "~/work/db", branch: "wip", state: .error),
-        4: AgentSession(id: "d4", backendID: "demo", title: "ledger sync", repoPath: "~/work/fin", branch: "main", state: .unknown)
-    ]
+    private static func demoSessions(_ appearance: String) -> [Int: AgentSession] {
+        var sessions: [Int: AgentSession] = [
+            0: AgentSession(id: "d0", backendID: "demo", title: "api refactor", repoPath: "~/work/api", branch: "main", state: .running),
+            1: AgentSession(id: "d1", backendID: "demo", title: "flaky test", repoPath: "~/work/api", branch: "fix/flake", state: .needsInput),
+            2: AgentSession(id: "d2", backendID: "demo", title: "changelog", repoPath: "~/work/docs", branch: "main", state: .complete),
+            3: AgentSession(id: "d3", backendID: "demo", title: "migration", repoPath: "~/work/db", branch: "wip", state: .error),
+            4: AgentSession(id: "d4", backendID: "demo", title: "ledger sync", repoPath: "~/work/fin", branch: "main", state: .unknown)
+        ]
+        // An idle key is a bound session doing nothing, so it needs a session to
+        // name; an unassigned one is an empty slot, so it must not have one.
+        if appearance == "light" {
+            sessions[5] = AgentSession(id: "d5", backendID: "demo", title: "release notes", repoPath: "~/work/docs", branch: "main", state: .idle)
+        }
+        return sessions
+    }
 
     private static func fail(_ message: String) -> Never {
         FileHandle.standardError.write(Data("render FAILED: \(message)\n".utf8))

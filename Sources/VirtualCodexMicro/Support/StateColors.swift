@@ -20,6 +20,22 @@ import SwiftUI
 /// composed colour is what the eye actually sees. In increased-contrast mode
 /// translucency is dropped to opaque and the edge stroke thickens, per the
 /// Reduce Transparency requirement.
+///
+/// The lit states sit on a **luminance ladder**, and that is the load-bearing
+/// property of this file. Each state is one `minimumStateSeparation` step from
+/// its neighbours in composed luminance, so the six-key wall still reads as
+/// distinct states in greyscale, to a deuteranope, and in peripheral vision —
+/// which is rod-dominated and largely hue-blind, and is the glance the whole
+/// product is for. Before this ladder every lit state had been tuned in
+/// isolation to clear 4.5:1 against a white label, which put all four on one
+/// luminance: `complete` and `error` were 1.00:1 apart, done and failed
+/// indistinguishable without hue.
+///
+/// Which state gets which rung is forced, not chosen. Hue caps luminance: pure
+/// blue tops out at 0.07 relative luminance, pure red at 0.21, so `running` has
+/// to live at the bottom of the ladder and `error` low-to-middle, while amber
+/// only reads as amber high up. That leaves `complete` in the middle and the one
+/// hue-free state, `unknown`, to fill whichever rung is left over.
 public enum StateColors {
 
     // MARK: - Colour value
@@ -167,58 +183,78 @@ public enum StateColors {
                 restingFillOpacity: 0.55, restingGlowOpacity: 0.10, restingGlowRadius: 2
             )
 
-        // Bound and alive but doing nothing. White: present, not working.
+        // Bound and alive but doing nothing. A pale neutral: present, not
+        // working. It is the one lit state *off* the ladder — six rungs at 1.8
+        // do not fit between black and white (1.8^5 = 18.9 against a usable
+        // range of about 17), so it takes the widest gap the ladder leaves,
+        // between `complete` and `needsInput`. In the light appearances it is
+        // pushed to the panel-separating end of that gap instead of the middle,
+        // because there it has to clear the backdrop as well: at the old
+        // near-white value it sat 1.17:1 from the panel and read as a hole
+        // rather than a key.
         case .idle:
             StatePalette(
-                lightFill: RGB(0xFDFDFF), lightLabel: RGB(0x1F1F24),
-                darkFill: RGB(0xE9E9F0), darkLabel: RGB(0x141418),
-                lightContrastFill: RGB(0xFFFFFF), lightContrastLabel: RGB(0x000000),
-                darkContrastFill: RGB(0xFFFFFF), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0xA1A1AD), lightLabel: RGB(0x1F1F24),
+                darkFill: RGB(0xE4E4E8), darkLabel: RGB(0x141418),
+                lightContrastFill: RGB(0xACACAC), lightContrastLabel: RGB(0x000000),
+                darkContrastFill: RGB(0xD3D3D3), darkContrastLabel: RGB(0x000000),
                 lightGlow: RGB(0xFFFFFF), darkGlow: RGB(0xFFFFFF),
                 restingFillOpacity: 0.85, restingGlowOpacity: 0.55, restingGlowRadius: 9
             )
 
         // Working. The one state that animates, so it wants the widest halo.
+        // Bottom rung, and not by preference: a saturated blue cannot be lighter
+        // than 0.07 relative luminance, so this is the only rung it fits.
         case .running:
             StatePalette(
-                lightFill: RGB(0x0A54C6), lightLabel: RGB(0xFFFFFF),
-                darkFill: RGB(0x1E64E0), darkLabel: RGB(0xFFFFFF),
-                lightContrastFill: RGB(0x00429E), lightContrastLabel: RGB(0xFFFFFF),
-                darkContrastFill: RGB(0x3D8BFF), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0x073780), lightLabel: RGB(0xFFFFFF),
+                darkFill: RGB(0x0D2C63), darkLabel: RGB(0xFFFFFF),
+                lightContrastFill: RGB(0x01429C), lightContrastLabel: RGB(0xFFFFFF),
+                darkContrastFill: RGB(0x00317A), darkContrastLabel: RGB(0xFFFFFF),
                 lightGlow: RGB(0x2E7BFF), darkGlow: RGB(0x4A90FF),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.75, restingGlowRadius: 12
             )
 
-        // Finished cleanly.
+        // Finished cleanly. Fourth rung, which is well above where a white label
+        // stays legible, so the label is a dark tint of the fill's own green.
+        // That flip is the point: the previous palette held every lit state down
+        // to whatever a white label needed, and that is what collapsed the set.
         case .complete:
             StatePalette(
-                lightFill: RGB(0x12693A), lightLabel: RGB(0xFFFFFF),
-                darkFill: RGB(0x1E7D45), darkLabel: RGB(0xFFFFFF),
-                lightContrastFill: RGB(0x004C24), lightContrastLabel: RGB(0xFFFFFF),
-                darkContrastFill: RGB(0x3FD07A), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0x1CA95D), lightLabel: RGB(0x072917),
+                darkFill: RGB(0x4DD384), darkLabel: RGB(0x0D351D),
+                lightContrastFill: RGB(0x00B254), lightContrastLabel: RGB(0x002A14),
+                darkContrastFill: RGB(0x3ACF77), darkContrastLabel: RGB(0x000000),
                 lightGlow: RGB(0x25A55C), darkGlow: RGB(0x3ED27C),
                 restingFillOpacity: 0.90, restingGlowOpacity: 0.70, restingGlowRadius: 10
             )
 
         // Blocked on the user. Attention-worthy, so it glows hardest of the
-        // non-failures.
+        // non-failures. Top rung: amber only reads as amber when it is light, so
+        // it takes the brightest step. In the dark appearances the top rung is
+        // pale enough that the face alone is a warm off-white — the amber
+        // identity is carried by the halo, which is the widest on the panel.
         case .needsInput:
             StatePalette(
-                lightFill: RGB(0xF0A63C), lightLabel: RGB(0x241703),
-                darkFill: RGB(0xE39A2E), darkLabel: RGB(0x201502),
-                lightContrastFill: RGB(0xFFB43C), lightContrastLabel: RGB(0x000000),
-                darkContrastFill: RGB(0xFFC24D), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0xF6C682), lightLabel: RGB(0x241703),
+                darkFill: RGB(0xFCF6EC), darkLabel: RGB(0x201502),
+                lightContrastFill: RGB(0xFEC76E), lightContrastLabel: RGB(0x000000),
+                darkContrastFill: RGB(0xFFF2D6), darkContrastLabel: RGB(0x000000),
                 lightGlow: RGB(0xFFB44A), darkGlow: RGB(0xFFC15C),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.85, restingGlowRadius: 13
             )
 
-        // Failed.
+        // Failed. Third rung. Red cannot go above 0.21 relative luminance while
+        // staying red, which fixes it here and is also why it must not share a
+        // rung with `complete`: red and green at one luminance is the textbook
+        // deuteranopia failure, and "done" versus "failed" is the most expensive
+        // confusion this panel can cause.
         case .error:
             StatePalette(
-                lightFill: RGB(0xC4172B), lightLabel: RGB(0xFFFFFF),
-                darkFill: RGB(0xD4293C), darkLabel: RGB(0xFFFFFF),
-                lightContrastFill: RGB(0x98000F), lightContrastLabel: RGB(0xFFFFFF),
-                darkContrastFill: RGB(0xFF6A78), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0xCF192E), lightLabel: RGB(0xFFFFFF),
+                darkFill: RGB(0xDE5766), darkLabel: RGB(0x140406),
+                lightContrastFill: RGB(0xDE0015), lightContrastLabel: RGB(0xFFFFFF),
+                darkContrastFill: RGB(0xFE2F42), darkContrastLabel: RGB(0x000000),
                 lightGlow: RGB(0xE83A4C), darkGlow: RGB(0xFF5566),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.85, restingGlowRadius: 13
             )
@@ -227,12 +263,18 @@ public enum StateColors {
         // grey: it must not read as an empty slot, because "we lost track of a
         // real session" and "nothing here" are different facts and confusing
         // them is the drift failure the PRD names as risk #1.
+        //
+        // Having no hue, it takes whichever rung the four hues leave free, so it
+        // is the darkest state on a light panel and the second-darkest on a dark
+        // one. It cannot be the darkest in the dark appearances: it has to stay
+        // 1.8 clear of `unassigned`, which sits at panel luminance there, and
+        // four more 1.8 steps above that would run past white.
         case .unknown:
             StatePalette(
-                lightFill: RGB(0x5D5D6B), lightLabel: RGB(0xFFFFFF),
-                darkFill: RGB(0x6A6A7A), darkLabel: RGB(0xFFFFFF),
-                lightContrastFill: RGB(0x4A4A56), lightContrastLabel: RGB(0xFFFFFF),
-                darkContrastFill: RGB(0x9A9AA8), darkContrastLabel: RGB(0x000000),
+                lightFill: RGB(0x0F0F12), lightLabel: RGB(0xFFFFFF),
+                darkFill: RGB(0x565664), darkLabel: RGB(0xFFFFFF),
+                lightContrastFill: RGB(0x1C1C21), lightContrastLabel: RGB(0xFFFFFF),
+                darkContrastFill: RGB(0x5B5B69), darkContrastLabel: RGB(0xFFFFFF),
                 lightGlow: RGB(0x9A9AA8), darkGlow: RGB(0xB0B0BE),
                 restingFillOpacity: 0.94, restingGlowOpacity: 0.60, restingGlowRadius: 8
             )
@@ -344,9 +386,25 @@ public enum StateColors {
     /// the large-text 3:1 allowance does not apply.
     public static let minimumLabelContrast = 4.5
 
-    /// Floor for telling `unknown` apart from `unassigned` by fill alone. Not a
-    /// WCAG number — a legibility one. Below this the two read as the same tile.
+    /// Floor for telling two states apart by fill alone. Not a WCAG number — a
+    /// legibility one. Below this the two read as the same tile in greyscale, to
+    /// a deuteranope, and at a glance.
     public static let minimumStateSeparation = 1.8
+
+    /// The states that render as a lit key, and so have to be mutually
+    /// distinguishable by luminance alone. Derived from `allCases` by exclusion
+    /// rather than listed, so an eighth state joins the pairwise check by
+    /// default instead of by remembering.
+    ///
+    /// `unassigned` is out because an empty slot is not a state and is meant to
+    /// recede into the panel; it is guarded separately against `unknown`, which
+    /// is the confusion that actually costs something. `idle` is out because the
+    /// ladder has no room: `minimumStateSeparation` to the power of six exceeds
+    /// the luminance range available between black and white, so a sixth rung
+    /// cannot exist. It is placed in the widest gap the ladder leaves and its
+    /// separations are documented rather than enforced.
+    public static let litStates: [AgentState] =
+        AgentState.allCases.filter { $0 != .unassigned && $0 != .idle }
 
     // MARK: - Self check
 
@@ -377,6 +435,25 @@ public enum StateColors {
             for (_, states) in byFill where states.count > 1 {
                 let names = states.map(\.rawValue).sorted().joined(separator: ", ")
                 failures.append("states share one fill in \(appearance.rawValue): \(names)")
+            }
+
+            // Every lit pair, not one of them. The byte-identity test above is
+            // not enough on its own and never was: `complete` and `error` were
+            // different colours at the same luminance, 1.00:1 apart, and passed
+            // it. Pairs are generated from `litStates` so nothing has to be
+            // remembered when a state is added.
+            for (index, first) in litStates.enumerated() {
+                for second in litStates.dropFirst(index + 1) {
+                    let separation = contrastRatio(
+                        swatch(for: first, in: appearance).composedKeyFill,
+                        swatch(for: second, in: appearance).composedKeyFill
+                    )
+                    if separation < minimumStateSeparation {
+                        failures.append(
+                            "\(first.rawValue) vs \(second.rawValue) separation \(fmt(separation)):1 in \(appearance.rawValue), needs \(fmt(minimumStateSeparation)):1"
+                        )
+                    }
+                }
             }
 
             // "No session" and "lost track of a session" must not look alike.
