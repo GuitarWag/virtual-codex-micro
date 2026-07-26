@@ -38,6 +38,12 @@ TAIL_BYTES = 1 << 20
 CONF_HIGH, CONF_MED, CONF_LOW, CONF_NONE = "high", "medium", "low", "none"
 
 
+def now_hms():
+    """Millisecond wall clock. The transition log doubles as the measurement
+    record for detection delay, so seconds are not enough resolution."""
+    return datetime.now().strftime("%H:%M:%S.%f")[:-3]
+
+
 def parse_ts(s):
     if not isinstance(s, str):
         return None
@@ -112,7 +118,16 @@ def infer(records, quiet_after, now=None):
     if t == "assistant":
         sr = last.get("message", {}).get("stop_reason")
         if sr == "end_turn":
-            return ("idle" if quiet else "complete"), CONF_MED, f"end_turn, age={age}"
+            # end_turn is NOT a turn boundary. 115 of 372 end_turns in the
+            # corpus are followed immediately by another end_turn: the CLI
+            # emits one per assistant message, and a turn can hold several.
+            # Only turn_duration closes a turn. So a fresh end_turn is exactly
+            # the ambiguity this state model exists for.
+            if quiet:
+                return "idle", CONF_LOW, f"end_turn then {age:.0f}s silence"
+            return "unknown", CONF_NONE, (
+                "end_turn with no turn_duration — finished, or mid-turn "
+                "between assistant messages")
         if sr is None:
             # Streaming chunk mid-response.
             return "running", CONF_MED, "assistant chunk, stop_reason null"
@@ -130,6 +145,32 @@ def infer(records, quiet_after, now=None):
         return "running", CONF_LOW, f"queue {last.get('operation')}"
 
     return "unknown", CONF_NONE, f"unhandled tail record {t}/{sub}"
+
+
+def session_ids(recs, path):
+    """(display_id, {candidate ids}) for joining a transcript to a live process.
+
+    Two differently-spelled fields, two different meanings:
+      sessionId   camelCase. Transcript identity; equals the filename for main
+                  transcripts, the parent's id inside subagents/.
+      session_id  snake_case. The id of the process that actually wrote the
+                  record. On a resumed or forked session this is a *different*
+                  uuid — a29ca670....jsonl carries records stamped 6e5140c0,
+                  which is the id the live `claude --session-id` argv shows.
+
+    Matching a running process on the filename alone reports a live resumed
+    session as dead, so try every candidate.
+    """
+    base = os.path.basename(path)[:-6]
+    cands, display = {base}, None
+    for r in reversed(recs):
+        for k in ("session_id", "sessionId"):
+            v = r.get(k)
+            if v:
+                cands.add(v)
+                if k == "session_id" and display is None:
+                    display = v  # newest writer wins
+    return display or base, cands
 
 
 def live_sessions():
@@ -198,18 +239,22 @@ def find_transcripts(include_subagents=False):
 def snapshot(args):
     live = live_sessions()
     rows = []
+    known = set()
     for path in find_transcripts(args.subagents):
-        sid = os.path.basename(path)[:-6]
         recs, _ = read_tail(path)
+        sid, cands = session_ids(recs, path)
+        known |= cands
         state, conf, why = infer(recs, args.quiet_after)
-        pid = live.get(sid)
+        pid = next((live[c] for c in cands if c in live), None)
+        if sid != os.path.basename(path)[:-6]:
+            why += f" [resumed/forked; file {os.path.basename(path)[:8]}]"
         rows.append((os.path.getmtime(path), sid, state, conf, pid, why))
     rows.sort(reverse=True)
     print(f"{'mtime':<9}{'session':<14}{'inferred':<11}{'conf':<8}{'pid':<8}reason")
     for mt, sid, state, conf, pid, why in rows:
         print(f"{time.strftime('%H:%M:%S', time.localtime(mt)):<9}{sid[:12]:<14}"
               f"{state:<11}{conf:<8}{str(pid or '-'):<8}{why}")
-    ghosts = set(live) - {os.path.basename(p)[:-6] for p in find_transcripts(args.subagents)}
+    ghosts = set(live) - known
     for g in sorted(ghosts):
         print(f"{'-':<9}{g[:12]:<14}{'unknown':<11}{'none':<8}{live[g]:<8}"
               f"live process, no transcript file on disk")
@@ -224,7 +269,8 @@ def follow(args):
     for path in find_transcripts(args.subagents):
         recs, off = read_tail(path)
         state, conf, why = infer(recs, args.quiet_after)
-        files[path] = {"off": off, "recs": recs[-40:], "state": state, "conf": conf}
+        files[path] = {"off": off, "recs": recs[-40:], "state": state, "conf": conf,
+                       "ids": session_ids(recs, path)}
     print(f"watching {len(files)} transcripts, interval {args.interval}s. ctrl-c to stop.")
     for path, f in files.items():
         if f["state"] != "unknown":
@@ -241,8 +287,9 @@ def follow(args):
                 if f is None:
                     recs, off = read_tail(path)
                     files[path] = f = {"off": off, "recs": recs[-40:],
-                                       "state": "unassigned", "conf": CONF_NONE}
-                    print(f"[{time.strftime('%H:%M:%S')}] NEW FILE "
+                                       "state": "unassigned", "conf": CONF_NONE,
+                                       "ids": session_ids(recs, path)}
+                    print(f"[{now_hms()}] NEW FILE "
                           f"{os.path.basename(path)[:12]}")
                 try:
                     if os.path.getsize(path) == f["off"]:
@@ -256,13 +303,14 @@ def follow(args):
                                 if rt:
                                     delays.append((detect - rt).total_seconds())
                             f["recs"] = (f["recs"] + new)[-40:]
+                            f["ids"] = session_ids(f["recs"], path)
                 except OSError:
                     continue
                 state, conf, why = infer(f["recs"], args.quiet_after)
                 if (state, conf) != (f["state"], f["conf"]):
-                    sid = os.path.basename(path)[:-6]
-                    pid = live.get(sid)
-                    print(f"[{time.strftime('%H:%M:%S')}] {sid[:12]} "
+                    sid, cands = f["ids"]
+                    pid = next((live[c] for c in cands if c in live), None)
+                    print(f"[{now_hms()}] {sid[:12]} "
                           f"{f['state']}/{f['conf']} -> {state}/{conf} "
                           f"pid={pid or '-'} :: {why}")
                     f["state"], f["conf"] = state, conf
@@ -308,11 +356,17 @@ def selftest():
         ("mid tool, quiet", [A("tool_use", [use("t1", "Bash")])], late, "unknown"),
         ("AskUserQuestion pending", [A("tool_use", [use("t1", "AskUserQuestion")])],
          late, "needsInput"),
+        # A fresh end_turn is ambiguous: could be the last message of the turn
+        # or one of several within it. Must abstain.
         ("tool resolved then end_turn",
          [A("tool_use", [use("t1", "Bash")]), U([res("t1")]),
-          A("end_turn", [{"type": "text", "text": "x"}])], now, "complete"),
+          A("end_turn", [{"type": "text", "text": "x"}])], now, "unknown"),
+        ("end_turn then silence",
+         [A("end_turn", [{"type": "text", "text": "x"}])], late, "idle"),
         ("turn_duration fresh",
          [A("end_turn", [])] + noise + [sysrec("turn_duration")], now, "complete"),
+        ("two end_turns in one turn are not a boundary",
+         [A("end_turn", []), A("end_turn", [])], now, "unknown"),
         ("turn_duration stale",
          [A("end_turn", [])] + noise + [sysrec("turn_duration")], late, "idle"),
         # Noise after a turn boundary must not reset the reading.

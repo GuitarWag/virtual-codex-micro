@@ -48,7 +48,9 @@ def main():
         os.chdir(cwd)
         os.environ["TERM"] = "xterm-256color"
         os.environ.pop("CLAUDE_CODE_ENTRYPOINT", None)
-        os.execv(claude, [claude, "--settings", settings, "--model", "sonnet"])
+        args=[claude,"--model","sonnet"]
+        if os.environ.get("VCM_USE_FLAG_SETTINGS")=="1": args+=["--settings",settings]
+        os.execv(claude,args)
 
     fcntl.ioctl(fd, termios.TIOCSWINSZ, struct.pack("HHHH", 45, 140, 0, 0))
     log("note", "spawned")
@@ -101,14 +103,15 @@ def main():
         if saw_dialog and time.time() - t_start > 0:
             # hold for 25s of total keyboard silence, then decline
             if not declined and "".join(screen).count("DIALOG_HOLD_DONE") == 0:
-                hold_end = time.time() + 25
+                hold_end = time.time() + float(os.environ.get("VCM_HOLD","25"))
                 while time.time() < hold_end:
                     if not pump(1):
                         break
                 log("note", "hold elapsed, declining")
-                send("\x1b", "escape (decline)")
+                act=os.environ.get("VCM_ACTION","escape")
+                send({"approve":"\r","deny":"\x1b[B\x1b[B\r","escape":"\x1b","three":"3","two":"2"}[act], act)
                 declined = True
-                pump(4)
+                pump(float(os.environ.get("VCM_TAIL","4")))
                 break
 
     log("note", "exiting")

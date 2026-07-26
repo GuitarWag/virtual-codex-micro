@@ -7,6 +7,10 @@ import Foundation
 /// Add a case here for any logic whose breakage would be silent. Skip the
 /// one-liners.
 enum SelfCheck {
+    /// @MainActor because some module checks live on SwiftUI `View` types, which
+    /// infer main-actor isolation. This runs on the main thread at startup before
+    /// NSApplication exists, so the annotation costs nothing.
+    @MainActor
     static func run() -> Never {
         var failures: [String] = []
 
@@ -38,6 +42,13 @@ enum SelfCheck {
         // own file so parallel work never contends on this one.
         failures += PanelLayout.selfCheckFailures().map { "layout: \($0)" }
         failures += StateColors.selfCheckFailures().map { "colors: \($0)" }
+        failures += PanelController.selfCheckFailures().map { "panel: \($0)" }
+        failures += HotkeyCenter.selfCheckFailures().map { "hotkey: \($0)" }
+        failures += AgentKeyView.selfCheckFailures().map { "agentkey: \($0)" }
+        failures += CommandKeyView.selfCheckFailures().map { "cmdkey: \($0)" }
+        failures += DialView.selfCheckFailures().map { "dial: \($0)" }
+        failures += DirectionPadView.selfCheckFailures().map { "pad: \($0)" }
+        failures += MockBackend.selfCheckFailures().map { "mock: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

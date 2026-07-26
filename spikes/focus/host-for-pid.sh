@@ -36,8 +36,10 @@ done
 
 # If the pane belongs to tmux, the tree walk above found the tmux server's
 # ancestor (usually launchd) - resolve the host from the attached client instead.
+# Scope list-clients to the pane's OWN session: an unscoped lookup happily returns
+# a client of some unrelated session and names the wrong terminal window.
 if [ "$tmux_target" != "-" ] && [ "$host" = "-" ]; then
-  client_tty=$(tmux list-clients -F '#{client_tty}' 2>/dev/null | head -1)
+  client_tty=$(tmux list-clients -t "${tmux_target%%:*}" -F '#{client_tty}' 2>/dev/null | head -1)
   if [ -n "$client_tty" ]; then
     client_pid=$(ps -t "${client_tty#/dev/}" -o pid= 2>/dev/null | head -1 | tr -d ' ')
     [ -n "$client_pid" ] && host=$("$0" "$client_pid" | awk '{print $2}')

@@ -8,30 +8,6 @@
   > Close the PRD open questions with written decisions: Claude Code as first-class v1 backend; owned-vs-observed session split with capability gating; direct notarized distribution rather than App Store (sandbox cannot host PTY spawning plus ~/.claude reads plus Automation); replica fidelity as zone-and-order faithful with pointer-optimised proportions. Add the seventh `unknown` visual state to the state model, distinct from `unassigned`. Blocks M1 — the layout and the key component both depend on the final state list.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-007] **Floating NSPanel shell** `priority:critical` `assignee:claude` `tags:m1,panel` `due:2026-08-08`
-  > NSPanel subclass with .nonactivatingPanel and .titled styles suppressed, level .floating, collectionBehavior .canJoinAllSpaces plus .fullScreenAuxiliary, hosting SwiftUI via NSHostingView. Must not steal focus from the editor when shown, must survive Space switches and display reconfiguration, and must restore its last screen position across launches. Pin toggle switches between always-visible and hide-on-focus-loss. This is the load-bearing piece of the whole product; the rest of M1 hangs off it.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-008] **Global hotkey to summon, hide and pin** `priority:high` `assignee:claude` `tags:m1,panel` `due:2026-08-09`
-  > System-wide shortcut registration that works while another app is frontmost. Use Carbon RegisterEventHotKey (or the KeyboardShortcuts package if a recorder UI is wanted) rather than NSEvent global monitors, so no Accessibility permission is required just to summon the panel. Default binding plus a user-recordable override, conflict detection against existing system shortcuts, and a separate binding for pin.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-010] **Agent key component with seven states** `priority:critical` `assignee:claude` `tags:m1,ui` `due:2026-08-14`
-  > Frosted key view with inner glow driven by state: unassigned, idle, running, complete, needs-input, error, unknown. Hover, press and focus-ring treatments. State transitions animate; animation is gated on Reduce Motion and glow is gated on Reduce Transparency. The brightest element on the panel, because it carries the entire at-a-glance proposition — every other component should read as quieter than this one.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-012] **Command key cluster** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-16`
-  > Six fixed-position command keys — accept, reject, new session, push-to-talk, custom 1, custom 2 — with icon plus short label, lower fill intensity than agent keys, and a distinct disabled treatment. Disabled is a first-class visual state here, not an afterthought: on observed sessions accept and reject genuinely cannot fire, and the key must say so rather than fail silently on click.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-013] **Rotary dial control** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-18`
-  > Circular effort selector with discrete notches, driven by rotational drag, horizontal drag and scroll wheel. Centre click resets to default. Tooltip and accessibility value both report the semantic label rather than a raw number. Keyboard equivalent: arrow keys step, Home resets. Should read as a rotary encoder, not a slider bent into a circle.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-014] **Four-direction preset launcher** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-18`
-  > Planar four-way pad with centre. Up, right, down, left each fire a workflow preset; centre tap opens the preset chooser. Hover reveals the bound preset name. Keyboard equivalents for all five targets, since a pad is the hardest zone to reach by tab order alone.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-016] **Accessibility pass** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-21`
   > Every key reachable and actuatable by keyboard with a predictable order across the four zones. VoiceOver labels that state role, binding and current status. Every colour state paired with text, icon or pulse so status never depends on hue alone. Reduce Motion disables pulse and glow animation; Reduce Transparency swaps frosted materials for solid fills with defined edges. Labels must stay legible at the compact panel size. Non-negotiable scope — this is the accessibility floor, not polish.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -106,24 +82,12 @@
 
 ## IN PROGRESS
 
-- [>] [T-VCMPLAN1-001] **M0 gate: spike PTY control of an owned agent session** `priority:critical` `assignee:claude` `tags:m0,spike,backend` `due:2026-07-31`
-  > Throwaway harness that spawns `claude` under a pseudo-terminal (Foundation Process + openpty, or SwiftPTY), reads its output stream, and injects input: a plain prompt, an approval keystroke on a pending diff, and a slash command such as effort change. Measure whether input lands deterministically when the child is mid-render, and whether output is parseable enough to detect a pending approval. Deliverable: harness in spikes/pty/ plus a verdict paragraph in PLAN.md. This gates the entire command-key cluster — if injection is unreliable, command keys become focus-only and M1 scope shrinks before we spend three weeks on chrome.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [>] [T-VCMPLAN1-002] **M0 gate: spike hook-based state push from Claude Code** `priority:critical` `assignee:claude` `tags:m0,spike,state` `due:2026-07-31`
   > Register SessionStart, Stop, Notification, PreToolUse and PostToolUse hooks in a scratch copy of ~/.claude/settings.json, each POSTing its JSON payload to a local HTTP listener. Record which of the six product states (unassigned, idle, running, complete, needs-input, error) each hook can actually witness, the wall-clock latency from real transition to received event, and what session identity the payload carries so events can be attributed to a bound key. Notification is the candidate signal for needs-input — confirm or kill that assumption. Deliverable: event/state mapping table in PLAN.md.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [>] [T-VCMPLAN1-003] **M0: spike transcript tailing as cold-start fallback** `priority:high` `assignee:claude` `tags:m0,spike,state` `due:2026-08-01`
-  > Watch ~/.claude/projects/<slug>/*.jsonl with FSEvents and infer state from the tail of the record stream (last message role, unresolved tool_use, error entries). Needed because hooks only cover sessions that started after hook installation, and the panel will routinely open mid-session. Compare inferred state against ground truth from the hook spike on the same session. Deliverable: accuracy note and a decision on whether tailing is good enough to ship as fallback or only as a hint.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [>] [T-VCMPLAN1-004] **M0: spike foregrounding a foreign terminal session** `priority:high` `assignee:claude` `tags:m0,spike,backend` `due:2026-08-01`
   > Given a session id, raise the exact window and tab that owns it. Test Terminal.app, iTerm2 and Ghostty via AppleScript/Automation, plus tmux select-window when the process sits inside a tmux pane. Record which permission prompt each path triggers and which emulators cannot be targeted at all. Focus is the one action that works on observed sessions, so its reliability sets the floor for the product's value. Deliverable: per-emulator support matrix.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [>] [T-VCMPLAN1-015] **Mock state driver** `priority:high` `assignee:claude` `tags:m1,state` `due:2026-08-19`
-  > Scripted driver that walks the six keys through every state and transition on a timeline, plus a manual override panel in debug builds. Lets M1 be reviewed, screenshotted and QA'd with zero backend, and becomes the fixture for later UI tests. Implements the same protocol the real adapters will, so M2 swaps it out rather than deleting it.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## DONE
@@ -138,6 +102,42 @@
 
 - [x] [T-VCMPLAN1-011] **State colour tokens for light, dark and high contrast** `priority:high` `assignee:claude` `tags:m1,ui,a11y` `due:2026-08-14`
   > Semantic colour set defined in Swift code — NOT an asset catalog, because actool ships with Xcode and this machine has Command Line Tools only. Light and dark variants plus a high-contrast pair for each state: white idle, blue running, green complete, amber needs-input, red error, dim unassigned, grey-hatched unknown. Verify contrast of the paired label text against the key fill in all four appearance combinations. Colours are named by meaning, never by hue, so a later palette change touches one place.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-001] **M0 gate: spike PTY control of an owned agent session** `priority:critical` `assignee:claude` `tags:m0,spike,backend` `due:2026-07-31`
+  > Throwaway harness that spawns `claude` under a pseudo-terminal (Foundation Process + openpty, or SwiftPTY), reads its output stream, and injects input: a plain prompt, an approval keystroke on a pending diff, and a slash command such as effort change. Measure whether input lands deterministically when the child is mid-render, and whether output is parseable enough to detect a pending approval. Deliverable: harness in spikes/pty/ plus a verdict paragraph in PLAN.md. This gates the entire command-key cluster — if injection is unreliable, command keys become focus-only and M1 scope shrinks before we spend three weeks on chrome.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-003] **M0: spike transcript tailing as cold-start fallback** `priority:high` `assignee:claude` `tags:m0,spike,state` `due:2026-08-01`
+  > Watch ~/.claude/projects/<slug>/*.jsonl with FSEvents and infer state from the tail of the record stream (last message role, unresolved tool_use, error entries). Needed because hooks only cover sessions that started after hook installation, and the panel will routinely open mid-session. Compare inferred state against ground truth from the hook spike on the same session. Deliverable: accuracy note and a decision on whether tailing is good enough to ship as fallback or only as a hint.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-007] **Floating NSPanel shell** `priority:critical` `assignee:claude` `tags:m1,panel` `due:2026-08-08`
+  > NSPanel subclass with .nonactivatingPanel and .titled styles suppressed, level .floating, collectionBehavior .canJoinAllSpaces plus .fullScreenAuxiliary, hosting SwiftUI via NSHostingView. Must not steal focus from the editor when shown, must survive Space switches and display reconfiguration, and must restore its last screen position across launches. Pin toggle switches between always-visible and hide-on-focus-loss. This is the load-bearing piece of the whole product; the rest of M1 hangs off it.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-008] **Global hotkey to summon, hide and pin** `priority:high` `assignee:claude` `tags:m1,panel` `due:2026-08-09`
+  > System-wide shortcut registration that works while another app is frontmost. Use Carbon RegisterEventHotKey (or the KeyboardShortcuts package if a recorder UI is wanted) rather than NSEvent global monitors, so no Accessibility permission is required just to summon the panel. Default binding plus a user-recordable override, conflict detection against existing system shortcuts, and a separate binding for pin.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-010] **Agent key component with seven states** `priority:critical` `assignee:claude` `tags:m1,ui` `due:2026-08-14`
+  > Frosted key view with inner glow driven by state: unassigned, idle, running, complete, needs-input, error, unknown. Hover, press and focus-ring treatments. State transitions animate; animation is gated on Reduce Motion and glow is gated on Reduce Transparency. The brightest element on the panel, because it carries the entire at-a-glance proposition — every other component should read as quieter than this one.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-012] **Command key cluster** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-16`
+  > Six fixed-position command keys — accept, reject, new session, push-to-talk, custom 1, custom 2 — with icon plus short label, lower fill intensity than agent keys, and a distinct disabled treatment. Disabled is a first-class visual state here, not an afterthought: on observed sessions accept and reject genuinely cannot fire, and the key must say so rather than fail silently on click.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-013] **Rotary dial control** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-18`
+  > Circular effort selector with discrete notches, driven by rotational drag, horizontal drag and scroll wheel. Centre click resets to default. Tooltip and accessibility value both report the semantic label rather than a raw number. Keyboard equivalent: arrow keys step, Home resets. Should read as a rotary encoder, not a slider bent into a circle.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-014] **Four-direction preset launcher** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-18`
+  > Planar four-way pad with centre. Up, right, down, left each fire a workflow preset; centre tap opens the preset chooser. Hover reveals the bound preset name. Keyboard equivalents for all five targets, since a pad is the hardest zone to reach by tab order alone.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-015] **Mock state driver** `priority:high` `assignee:claude` `tags:m1,state` `due:2026-08-19`
+  > Scripted driver that walks the six keys through every state and transition on a timeline, plus a manual override panel in debug builds. Lets M1 be reviewed, screenshotted and QA'd with zero backend, and becomes the fixture for later UI tests. Implements the same protocol the real adapters will, so M2 swaps it out rather than deleting it.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

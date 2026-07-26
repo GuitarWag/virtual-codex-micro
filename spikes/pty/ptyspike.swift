@@ -20,6 +20,22 @@
 //     run <cmd...>         plain: spawn, stream output to stdout with a hard timeout, print exit status
 //
 // Every mode has a hard timeout. Nothing here waits forever.
+//
+// VERDICT (full writeup belongs in FINDINGS.md): RELIABLE WITH CAVEATS.
+//   - Injection is deterministic: 30/30 rounds landed, including bytes written before the child
+//     exec'd, and including into a mid-render full-screen TUI (vi test, verified on disk).
+//   - Reading state back out of a TUI byte stream is NOT reliable: text written out of screen order
+//     is invisible to substring matching, and one prompt yields ~60 identical hits that never
+//     un-fire. Needs an embedded terminal emulator, or a structured channel instead.
+//   - A child that enters raw mode with tcsetattr(TCSAFLUSH) silently DISCARDS input queued before
+//     that call (mode `prompt --raw-when=flush --early` reproduces it). Never fire-and-forget an
+//     accept keystroke.
+//   - Use forkpty, not openpty + Foundation.Process: the latter gives no controlling terminal, so
+//     closing the master does not hang up and every child is a guaranteed orphan (mode
+//     `openpty-ctty`).
+//   - Teardown must killpg + SIGKILL with a timeout. The pty hangup handles most cases but lost one
+//     child in 66 runs, and never reaches SIGHUP-ignoring grandchildren.
+//   - You must drain the master continuously or the child blocks in write() and looks hung.
 
 import Darwin
 import Foundation
@@ -397,6 +413,31 @@ case "run":
     report(noise)
     print("--- stripped output ---")
     print(plain)
+
+// 10. The OTHER spawn path: openpty() + Foundation.Process. Simpler Swift, but Process gives no
+//     hook to call setsid()/TIOCSCTTY, so the child gets a tty on fd 0/1/2 without it being its
+//     CONTROLLING terminal. Compare the session/tty columns and the hangup behaviour with forkpty.
+case "openpty-ctty":
+    var m: Int32 = 0, s: Int32 = 0
+    var ws = winsize(ws_row: 30, ws_col: 100, ws_xpixel: 0, ws_ypixel: 0)
+    guard openpty(&m, &s, nil, nil, &ws) == 0 else { print("openpty failed"); exit(1) }
+    let p = Process()
+    p.executableURL = URL(fileURLWithPath: "/bin/sh")
+    p.arguments = ["-c", rest.first ?? "tty; ps -o pid,ppid,pgid,sess,tty,stat,command -p $$; sleep 300"]
+    let slave = FileHandle(fileDescriptor: s, closeOnDealloc: false)
+    p.standardInput = slave; p.standardOutput = slave; p.standardError = slave
+    try! p.run()
+    close(s) // parent must drop the slave, else EOF never arrives
+    var sink = [UInt8]()
+    _ = pump(m, deadline: Date().addingTimeInterval(1.5), sink: &sink)
+    print("--- child's own view of its tty (via openpty + Foundation.Process) ---")
+    print(analyze(sink).plain)
+    print("closing master fd; does the child get SIGHUP?")
+    close(m)
+    let w = reap(p.processIdentifier, timeout: 3)
+    print("waitpid: \(w?.describe ?? "TIMED OUT — child SURVIVED the hangup")")
+    print("alive: \(alive(p.processIdentifier))")
+    if w == nil { kill(p.processIdentifier, SIGKILL); _ = reap(p.processIdentifier, timeout: 1) }
 
 default:
     print("unknown mode \(mode)")

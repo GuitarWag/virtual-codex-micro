@@ -63,29 +63,34 @@ for i in range(n):
 out, _ = watcher.communicate(timeout=60)
 print(out)
 
-# Pair each printed transition with the write that caused it, by clock order.
+# Pair each printed transition with the nearest earlier write. Only appends that
+# actually change the inferred state produce a line, so this is a subset.
 seen = []
 for line in out.splitlines():
     if line.startswith("[") and "->" in line:
-        seen.append(line[1:9])
+        seen.append(line[1:line.index("]")])
 
 
 def to_epoch(hms):
     lt = time.localtime()
-    h, m, s = (int(x) for x in hms.split(":"))
-    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, h, m, s, 0, 0, -1))
+    h, m, rest = hms.split(":")
+    s, ms = rest.split(".")
+    return time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, int(h), int(m),
+                        int(s), 0, 0, -1)) + int(ms) / 1000
 
 
 delays = []
-for i, hms in enumerate(seen):
-    if i < len(writes):
-        delays.append(to_epoch(hms) - int(writes[i]))
+for hms in seen:
+    det = to_epoch(hms)
+    earlier = [w for w in writes if w <= det]
+    if earlier:
+        delays.append(det - earlier[-1])
 print(f"poll interval {interval}s, {len(writes)} appends, "
-      f"{len(seen)} transitions detected")
+      f"{len(seen)} state transitions detected")
 if delays:
-    print(f"whole-second resolution delay: min={min(delays):.0f}s "
-          f"max={max(delays):.0f}s  (transition log is second-granular; the "
-          f"bound below is what matters)")
-print(f"theoretical bound: detection <= poll interval + stat cost = "
+    xs = sorted(delays)
+    print(f"write -> transition printed: min={xs[0]:.3f}s "
+          f"p50={xs[len(xs) // 2]:.3f}s max={xs[-1]:.3f}s")
+print(f"expected bound: detection <= poll interval + stat cost = "
       f"~{interval:.3f}s worst case")
 print(f"temp tree left at {root} (delete when done)")
