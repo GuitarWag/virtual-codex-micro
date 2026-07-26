@@ -143,20 +143,65 @@ public final class CmuxAdapter: AgentBackend {
     /// so there is nothing to ask about.
     public func discover() -> [Session] { Self.discover(cli: cli) }
 
-    static func discover(cli: CmuxCLI) -> [Session] {
+    static func discover(
+        cli: CmuxCLI,
+        sessionIDForWorkspace: [String: String] = [:],
+        sessionIDForPID: [Int32: String] = [:]
+    ) -> [Session] {
         let top = CmuxTopSnapshot.parse(tsv: cli.text(["top", "--processes", "--all", "--format", "tsv"]))
         var sessions: [Session] = []
         for tag in top.agentTags {
             let listed = CmuxSurfaceInfo.parse(
                 json: cli.text(["rpc", "surface.list", #"{"workspace_id":"\#(tag.workspaceUUID)"}"#])
             )
-            for surface in listed where surface.hostsClaude {
-                guard let sessionID = surface.claudeSessionID, !sessionID.isEmpty else { continue }
-                // A session id we cannot read is a session we cannot join to any
-                // other source, so it is skipped rather than given a made-up id.
-                let pid = tag.pids.first { top.join(agentPID: $0).resolvedRef == surface.ref }
+            for surface in listed {
+                let pidForSurface = tag.pids.first { top.join(agentPID: $0).resolvedRef == surface.ref }
+
+                // `hostsClaude` reads `resume_binding.kind`, and a surface that has
+                // never been resumed has no resume_binding AT ALL — so this gate
+                // rejected every new session before any identification was attempted.
+                // That, not the checkpoint id, is why a new session lit no key.
+                //
+                // A claude pid resolving to this surface is equally good evidence that
+                // it hosts a claude session, and it is available from the moment the
+                // process exists.
+                guard surface.hostsClaude || pidForSurface != nil else { continue }
+                // `checkpoint_id` is a RESUME binding, and that is the whole trap: it
+                // exists only once a session has been checkpointed, so a session the
+                // user has just opened has none. Discovery keyed solely on it, which
+                // meant every resumed session bound and every NEW one was invisible —
+                // observed live with two "✳ Claude Code" surfaces reporting
+                // checkpoint=NONE while four resumed siblings bound fine.
+                //
+                // The fallback is the event stream, which names the session id and its
+                // workspace from the first event a new session emits. The caller
+                // supplies that mapping; here it just fills the gap.
+                let pid = pidForSurface
+
+                // Three sources, in descending authority:
+                //
+                // 1. `checkpoint_id` — exact, but only exists once a session has been
+                //    checkpointed, so a session just opened has none.
+                // 2. The event stream, learned per workspace — but a session that has
+                //    not run a turn yet has emitted nothing to learn from.
+                // 3. The process's own argv.
+                //
+                // The third is what makes a brand-new session visible, and the split
+                // is measured: cmux launches a NEW session with `--session-id <uuid>`
+                // and a RESUMED one with `--resume <uuid>`. Keying only on the resume
+                // checkpoint bound every resumed session and left every new one
+                // invisible — two live sessions on this machine, both reporting
+                // checkpoint=NONE and no events, while carrying their id in argv the
+                // whole time.
+                let resolved = surface.claudeSessionID.flatMap { id in
+                    id.isEmpty ? nil : Self.stripSessionPrefix(id)
+                }
+                    ?? sessionIDForWorkspace[tag.workspaceUUID]
+                    ?? pid.flatMap { sessionIDForPID[$0] }
+
+                guard let sessionID = resolved, !sessionID.isEmpty else { continue }
                 sessions.append(Session(
-                    claudeSessionID: Self.stripSessionPrefix(sessionID),
+                    claudeSessionID: sessionID,
                     surfaceUUID: surface.uuid,
                     surfaceRef: surface.ref,
                     workspaceUUID: tag.workspaceUUID,
@@ -170,9 +215,27 @@ public final class CmuxAdapter: AgentBackend {
         return sessions
     }
 
+    /// Session ids learned from the event stream, keyed by workspace, so discovery
+    /// can identify a session that has no resume checkpoint yet.
+    private let learned = LearnedSessions()
+
+    actor LearnedSessions {
+        private var byWorkspace: [String: String] = [:]
+        func note(sessionID: String, workspaceUUID: String) { byWorkspace[workspaceUUID] = sessionID }
+        func snapshot() -> [String: String] { byWorkspace }
+    }
+
     public func discoverSessions() async throws -> [AgentSession] {
+        let hints = await learned.snapshot()
+        // Invert the argv join the transcript source already performs, rather than
+        // re-parsing `ps` here. It validates that the argument is a real UUID, which
+        // matters because `-r` also accepts a fuzzy search string.
+        let byPID = Dictionary(
+            ClaudeTranscriptSource.liveSessions().map { ($0.value, $0.key) },
+            uniquingKeysWith: { first, _ in first }
+        )
         let sessions = await Task.detached(priority: .utility) { [cli] in
-            CmuxAdapter.discover(cli: cli)
+            CmuxAdapter.discover(cli: cli, sessionIDForWorkspace: hints, sessionIDForPID: byPID)
         }.value
         return sessions.map(\.agentSession)
     }
@@ -215,6 +278,16 @@ public final class CmuxAdapter: AgentBackend {
         return AsyncStream { continuation in
             let task = Task {
                 for await event in events {
+                    // Learn the workspace↔session pairing from ANY event, not only
+                    // ones that carry a state: SessionStart is what a brand-new
+                    // session emits first, and it is exactly the session discovery
+                    // cannot otherwise identify.
+                    if let id = event.sessionID, let workspace = event.workspaceUUID {
+                        await learned.note(
+                            sessionID: CmuxAdapter.stripSessionPrefix(id),
+                            workspaceUUID: workspace
+                        )
+                    }
                     guard let state = event.outcome.state, let id = event.sessionID else { continue }
                     continuation.yield(AgentSession(
                         id: id,

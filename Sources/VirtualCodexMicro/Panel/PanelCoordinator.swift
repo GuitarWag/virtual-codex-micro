@@ -220,6 +220,7 @@ final class PanelCoordinator: ObservableObject {
             group.addTask { [weak self] in await self?.followHooks() }
             group.addTask { [weak self] in await self?.followTranscripts() }
             group.addTask { [weak self] in await self?.followCmux() }
+            group.addTask { [weak self] in await self?.followCmuxDiscovery() }
         }
     }
 
@@ -265,17 +266,51 @@ final class PanelCoordinator: ObservableObject {
     private func pollCmux() async {
         guard let found = try? await cmux.discoverSessions() else { return }
         for session in found {
+            let isNew = known[session.id] == nil
             cmuxHosted.insert(session.id)
             known[session.id] = DiscoveredSession(session: session)
-            record(session.state, for: session.id, from: .cmuxEvents)
+            // Only record a state on first sight. Discovery reports whatever cmux
+            // last knew, which is older than anything the event stream has already
+            // told us, and re-recording it would walk a key backwards every poll.
+            if isNew { record(session.state, for: session.id, from: .cmuxEvents) }
         }
     }
 
     private func followCmux() async {
         for await updated in cmux.stateUpdates() {
             cmuxHosted.insert(updated.id)
-            known[updated.id] = DiscoveredSession(session: updated)
+
+            // An event carries a state and a session id, and nothing else worth
+            // keeping: `stateUpdates` fills `title` with the raw id and has no
+            // surface UUID, cwd or pid. So it must NOT replace a discovered record —
+            // doing that degraded a session we could focus and send to into one we
+            // could only colour. Merge the state in; re-discover when the id is new.
+            if let existing = known[updated.id] {
+                var merged = existing.session
+                merged.state = updated.state
+                merged.lastTransition = updated.lastTransition
+                known[updated.id] = DiscoveredSession(session: merged, pid: existing.pid)
+            } else {
+                // A session that did not exist at launch. This is why opening a new
+                // session lit no key: discovery ran once at startup and never again,
+                // so a surface created afterwards was invisible — and the thin event
+                // record had no pid, so the live-only bind rule rejected it too.
+                await pollCmux()
+            }
+
             record(updated.state, for: updated.id, from: .cmuxEvents)
+            autobindFreeSlots()
+            refresh(discovered: discoveredSessions)
+        }
+    }
+
+    /// Re-discover on a timer as well as on unknown events. A surface can exist
+    /// without having emitted an agent event yet — opened, not yet prompted — and
+    /// that session should still take a key.
+    private func followCmuxDiscovery() async {
+        while !Task.isCancelled {
+            try? await Task.sleep(for: .seconds(4))
+            await pollCmux()
             autobindFreeSlots()
             refresh(discovered: discoveredSessions)
         }
