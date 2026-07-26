@@ -91,6 +91,35 @@ spike is for.
 - **More than six waiting agents** — an overflow affordance on the key cluster (count badge plus
   paging), never silent truncation. A panel that hides a blocked agent is worse than no panel.
 
+## Build environment
+
+Verified on this machine, 2026-07-26: macOS 26.5.2, Swift 6.3.3, **Command Line Tools only — no
+Xcode**. That single fact reshaped four decisions, so it is worth stating plainly rather than
+rediscovering it later.
+
+| Wanted | Available? | What we do instead |
+|---|---|---|
+| `xcodebuild`, `.xcodeproj` | no | SwiftPM package, `swift build` |
+| Asset catalog for colours (`actool`) | no | Colours defined in Swift with dynamic light/dark resolution |
+| `XCTest` / `swift-testing` | neither | Assert-based `SelfCheck`, run via `VCM_SELFTEST=1` |
+| `notarytool`, `stapler` | no | Ad-hoc signing for dev; notarization needs Xcode installed |
+| SwiftUI, AppKit, `NSPanel` | yes | Confirmed compiling and launching |
+
+Two of these are genuinely fine — a SwiftPM package with zero dependencies is a better fit for this
+app than an Xcode project, and code-defined colours are more testable than a catalog, since the
+contrast ratios can be asserted rather than trusted. The other two are real gaps: no test framework
+means invariants live in a hand-rolled self-check, and notarization in M4 is blocked until Xcode is
+installed.
+
+One thing the bundling script exists for, non-obviously: TCC (Accessibility, Automation) and Carbon
+hotkey registration both identify an app by bundle identity. A bare SwiftPM executable cannot hold
+either grant, and the permission would be re-prompted or silently denied. So `Scripts/bundle.sh`
+wraps the binary in an ad-hoc signed `.app` — needed from M1 for the global hotkey, not at ship time.
+
+The `tasks` CLI is also absent and has no discoverable installer, so `Scripts/task.py` is a ~90-line
+stand-in that reads and writes `tasks.md` in the identical format. Installing the real CLI later is a
+drop-in replacement.
+
 ## Distribution constraint
 
 Reading `~/.claude`, spawning processes under a PTY, and Automation/Accessibility access mean the App

@@ -4,28 +4,8 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-001] **M0 gate: spike PTY control of an owned agent session** `priority:critical` `assignee:claude` `tags:m0,spike,backend` `due:2026-07-31`
-  > Throwaway harness that spawns `claude` under a pseudo-terminal (Foundation Process + openpty, or SwiftPTY), reads its output stream, and injects input: a plain prompt, an approval keystroke on a pending diff, and a slash command such as effort change. Measure whether input lands deterministically when the child is mid-render, and whether output is parseable enough to detect a pending approval. Deliverable: harness in spikes/pty/ plus a verdict paragraph in PLAN.md. This gates the entire command-key cluster — if injection is unreliable, command keys become focus-only and M1 scope shrinks before we spend three weeks on chrome.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-002] **M0 gate: spike hook-based state push from Claude Code** `priority:critical` `assignee:claude` `tags:m0,spike,state` `due:2026-07-31`
-  > Register SessionStart, Stop, Notification, PreToolUse and PostToolUse hooks in a scratch copy of ~/.claude/settings.json, each POSTing its JSON payload to a local HTTP listener. Record which of the six product states (unassigned, idle, running, complete, needs-input, error) each hook can actually witness, the wall-clock latency from real transition to received event, and what session identity the payload carries so events can be attributed to a bound key. Notification is the candidate signal for needs-input — confirm or kill that assumption. Deliverable: event/state mapping table in PLAN.md.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-003] **M0: spike transcript tailing as cold-start fallback** `priority:high` `assignee:claude` `tags:m0,spike,state` `due:2026-08-01`
-  > Watch ~/.claude/projects/<slug>/*.jsonl with FSEvents and infer state from the tail of the record stream (last message role, unresolved tool_use, error entries). Needed because hooks only cover sessions that started after hook installation, and the panel will routinely open mid-session. Compare inferred state against ground truth from the hook spike on the same session. Deliverable: accuracy note and a decision on whether tailing is good enough to ship as fallback or only as a hint.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-004] **M0: spike foregrounding a foreign terminal session** `priority:high` `assignee:claude` `tags:m0,spike,backend` `due:2026-08-01`
-  > Given a session id, raise the exact window and tab that owns it. Test Terminal.app, iTerm2 and Ghostty via AppleScript/Automation, plus tmux select-window when the process sits inside a tmux pane. Record which permission prompt each path triggers and which emulators cannot be targeted at all. Focus is the one action that works on observed sessions, so its reliability sets the floor for the product's value. Deliverable: per-emulator support matrix.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-005] **M0: record architecture and distribution decisions** `priority:critical` `assignee:claude` `tags:m0,spike` `due:2026-08-02`
   > Close the PRD open questions with written decisions: Claude Code as first-class v1 backend; owned-vs-observed session split with capability gating; direct notarized distribution rather than App Store (sandbox cannot host PTY spawning plus ~/.claude reads plus Automation); replica fidelity as zone-and-order faithful with pointer-optimised proportions. Add the seventh `unknown` visual state to the state model, distinct from `unassigned`. Blocks M1 — the layout and the key component both depend on the final state list.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-006] **Scaffold Xcode project and build config** `priority:high` `assignee:claude` `tags:m1,panel` `due:2026-08-05`
-  > SwiftUI macOS app target, minimum macOS 14, LSUIElement so no Dock icon or menu bar, no storyboard. Set up SwiftFormat/SwiftLint, a debug scheme, and one smoke test target that launches the app and asserts the panel exists. Keep the dependency list empty at this stage; nothing here needs a package yet.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-007] **Floating NSPanel shell** `priority:critical` `assignee:claude` `tags:m1,panel` `due:2026-08-08`
@@ -36,16 +16,8 @@
   > System-wide shortcut registration that works while another app is frontmost. Use Carbon RegisterEventHotKey (or the KeyboardShortcuts package if a recorder UI is wanted) rather than NSEvent global monitors, so no Accessibility permission is required just to summon the panel. Default binding plus a user-recordable override, conflict detection against existing system shortcuts, and a separate binding for pin.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-009] **Layout spec and device silhouette frame** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-12`
-  > Single source-of-truth layout definition covering all four zones: six agent keys, command cluster, dial on the right, four-way pad lower-left. Rounded device-like silhouette instead of standard window chrome. Positions and ordering follow the reference control map; absolute proportions get tuned for pointer hit targets rather than traced. Every downstream component reads geometry from this one file so a spacing change never means editing six views.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-010] **Agent key component with seven states** `priority:critical` `assignee:claude` `tags:m1,ui` `due:2026-08-14`
   > Frosted key view with inner glow driven by state: unassigned, idle, running, complete, needs-input, error, unknown. Hover, press and focus-ring treatments. State transitions animate; animation is gated on Reduce Motion and glow is gated on Reduce Transparency. The brightest element on the panel, because it carries the entire at-a-glance proposition — every other component should read as quieter than this one.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-011] **State colour tokens for light, dark and high contrast** `priority:high` `assignee:claude` `tags:m1,ui,a11y` `due:2026-08-14`
-  > Semantic colour set in an asset catalog with light and dark variants plus a high-contrast pair for each state: white idle, blue running, green complete, amber needs-input, red error, dim unassigned, grey-hatched unknown. Verify contrast of the paired label text against the key fill in all four appearance combinations. Colours are named by meaning, never by hue, so a later palette change touches one place.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-012] **Command key cluster** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-16`
@@ -58,10 +30,6 @@
 
 - [ ] [T-VCMPLAN1-014] **Four-direction preset launcher** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-18`
   > Planar four-way pad with centre. Up, right, down, left each fire a workflow preset; centre tap opens the preset chooser. Hover reveals the bound preset name. Keyboard equivalents for all five targets, since a pad is the hardest zone to reach by tab order alone.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-015] **Mock state driver** `priority:high` `assignee:claude` `tags:m1,state` `due:2026-08-19`
-  > Scripted driver that walks the six keys through every state and transition on a timeline, plus a manual override panel in debug builds. Lets M1 be reviewed, screenshotted and QA'd with zero backend, and becomes the fixture for later UI tests. Implements the same protocol the real adapters will, so M2 swaps it out rather than deleting it.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-016] **Accessibility pass** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-21`
@@ -129,7 +97,7 @@
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-034] **Ship: notarized build, updates, idle click-through, legal pass** `priority:medium` `assignee:claude` `tags:m4,ship` `due:2026-11-15`
-  > Notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
+  > Partly blocked on tooling: notarytool and stapler ship with Xcode, which is not installed, so notarization cannot be completed in this environment — installing Xcode is a prerequisite for this task, and Scripts/bundle.sh currently ad-hoc signs instead. Scope: notarized DMG with a Sparkle update channel and hardened runtime entitlements that still permit PTY spawning and Automation. Click-through transparency when idle via ignoresMouseEvents, deliberately last so it never masks an untrustworthy state layer. Opt-in local-only metrics covering the PRD's activation and engagement measures. Final review of copy, icon and visuals to keep clear of implying an official OpenAI or Work Louder product.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-035] **Push-to-talk capture (deferred from v1 P1)** `priority:low` `assignee:claude` `tags:m3,backend` `due:2026-10-25`
@@ -138,7 +106,39 @@
 
 ## IN PROGRESS
 
+- [>] [T-VCMPLAN1-001] **M0 gate: spike PTY control of an owned agent session** `priority:critical` `assignee:claude` `tags:m0,spike,backend` `due:2026-07-31`
+  > Throwaway harness that spawns `claude` under a pseudo-terminal (Foundation Process + openpty, or SwiftPTY), reads its output stream, and injects input: a plain prompt, an approval keystroke on a pending diff, and a slash command such as effort change. Measure whether input lands deterministically when the child is mid-render, and whether output is parseable enough to detect a pending approval. Deliverable: harness in spikes/pty/ plus a verdict paragraph in PLAN.md. This gates the entire command-key cluster — if injection is unreliable, command keys become focus-only and M1 scope shrinks before we spend three weeks on chrome.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-002] **M0 gate: spike hook-based state push from Claude Code** `priority:critical` `assignee:claude` `tags:m0,spike,state` `due:2026-07-31`
+  > Register SessionStart, Stop, Notification, PreToolUse and PostToolUse hooks in a scratch copy of ~/.claude/settings.json, each POSTing its JSON payload to a local HTTP listener. Record which of the six product states (unassigned, idle, running, complete, needs-input, error) each hook can actually witness, the wall-clock latency from real transition to received event, and what session identity the payload carries so events can be attributed to a bound key. Notification is the candidate signal for needs-input — confirm or kill that assumption. Deliverable: event/state mapping table in PLAN.md.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-003] **M0: spike transcript tailing as cold-start fallback** `priority:high` `assignee:claude` `tags:m0,spike,state` `due:2026-08-01`
+  > Watch ~/.claude/projects/<slug>/*.jsonl with FSEvents and infer state from the tail of the record stream (last message role, unresolved tool_use, error entries). Needed because hooks only cover sessions that started after hook installation, and the panel will routinely open mid-session. Compare inferred state against ground truth from the hook spike on the same session. Deliverable: accuracy note and a decision on whether tailing is good enough to ship as fallback or only as a hint.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-004] **M0: spike foregrounding a foreign terminal session** `priority:high` `assignee:claude` `tags:m0,spike,backend` `due:2026-08-01`
+  > Given a session id, raise the exact window and tab that owns it. Test Terminal.app, iTerm2 and Ghostty via AppleScript/Automation, plus tmux select-window when the process sits inside a tmux pane. Record which permission prompt each path triggers and which emulators cannot be targeted at all. Focus is the one action that works on observed sessions, so its reliability sets the floor for the product's value. Deliverable: per-emulator support matrix.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-009] **Layout spec and device silhouette frame** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-12`
+  > Single source-of-truth layout definition covering all four zones: six agent keys, command cluster, dial on the right, four-way pad lower-left. Rounded device-like silhouette instead of standard window chrome. Positions and ordering follow the reference control map; absolute proportions get tuned for pointer hit targets rather than traced. Every downstream component reads geometry from this one file so a spacing change never means editing six views.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-011] **State colour tokens for light, dark and high contrast** `priority:high` `assignee:claude` `tags:m1,ui,a11y` `due:2026-08-14`
+  > Semantic colour set defined in Swift code — NOT an asset catalog, because actool ships with Xcode and this machine has Command Line Tools only. Light and dark variants plus a high-contrast pair for each state: white idle, blue running, green complete, amber needs-input, red error, dim unassigned, grey-hatched unknown. Verify contrast of the paired label text against the key fill in all four appearance combinations. Colours are named by meaning, never by hue, so a later palette change touches one place.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [>] [T-VCMPLAN1-015] **Mock state driver** `priority:high` `assignee:claude` `tags:m1,state` `due:2026-08-19`
+  > Scripted driver that walks the six keys through every state and transition on a timeline, plus a manual override panel in debug builds. Lets M1 be reviewed, screenshotted and QA'd with zero backend, and becomes the fixture for later UI tests. Implements the same protocol the real adapters will, so M2 swaps it out rather than deleting it.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
 ## DONE
+
+- [x] [T-VCMPLAN1-006] **Scaffold Xcode project and build config** `priority:high` `assignee:claude` `tags:m1,panel` `due:2026-08-05`
+  > Done, with scope amended by the environment. This machine has Command Line Tools only — no Xcode — which rules out xcodebuild, .xcodeproj, actool for asset catalogs, XCTest and swift-testing. So: SwiftPM executable target instead of an Xcode project, macOS 14 minimum, accessory activation policy set programmatically rather than via LSUIElement in a dev Info.plist, and an assert-based self-check run with VCM_SELFTEST=1 instead of a test target. Scripts/bundle.sh assembles an ad-hoc signed .app because TCC and Carbon hotkey registration both key off bundle identity and neither will attach to a bare SwiftPM binary. Verified: builds clean, self-check passes, bundled app launches. Zero dependencies.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED
 
