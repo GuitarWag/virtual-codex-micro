@@ -62,6 +62,7 @@ enum SelfCheck {
         failures += OverflowView.selfCheckFailures().map { "overflow: \($0)" }
         failures += KeyMapStore.selfCheckFailures().map { "keymap: \($0)" }
         failures += OnboardingView.selfCheckFailures().map { "onboarding: \($0)" }
+        failures += OwnedSession.selfCheckFailures().map { "owned: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")
