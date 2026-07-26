@@ -409,15 +409,35 @@ public final class PTYChild: @unchecked Sendable {
     ///   (spike test 3).
     /// - The pty hangup is not part of the plan. It leaked one child in 66 runs.
     @discardableResult
-    public func terminate(grace: TimeInterval = 2.0, killGrace: TimeInterval = 1.0) -> PTYExit {
+    public func terminate(
+        grace: TimeInterval = 2.0,
+        killGrace: TimeInterval = 1.0,
+        graceful: Bool = false
+    ) -> PTYExit {
         shared.withLock { $0.weAskedForTermination = true }
         defer { drain.cancel() }
 
         if !status().isRunning { return status() }
-        send(SIGTERM)
-        if let settled = wait(until: Date().addingTimeInterval(grace)) { return settled }
 
-        log.notice("pty child \(self.pid) ignored SIGTERM; escalating to SIGKILL")
+        // SIGKILL directly, and deliberately NOT SIGTERM first.
+        //
+        // The PTY spike recommended SIGTERM then SIGKILL, and against /bin/sh that
+        // is right. Against a real `claude` it is measurably wrong: the needsInput
+        // spike found SIGTERM-then-SIGKILL NEVER reaped it (5/5 within 3s+3s),
+        // because the CLI catches SIGTERM and keeps running, and a SIGKILL sent
+        // afterwards leaves it wedged in macOS `E` (exiting) state — controlling
+        // terminal already dropped — where waitpid never returns it. SIGKILL alone
+        // reaped in 0.1s (3/3), producing a clean zombie.
+        //
+        // A panel that opens and closes owned sessions all day would otherwise
+        // accumulate unreapable children for its whole lifetime. `graceful` exists
+        // for the rare caller that genuinely wants the child to run its own exit
+        // path, and accepts that teardown then cannot be confirmed.
+        if graceful {
+            send(SIGTERM)
+            if let settled = wait(until: Date().addingTimeInterval(grace)) { return settled }
+            log.notice("pty child \(self.pid) ignored SIGTERM; escalating to SIGKILL")
+        }
         send(SIGKILL)
         if let settled = wait(until: Date().addingTimeInterval(killGrace)) { return settled }
 
@@ -1215,7 +1235,7 @@ public extension OwnedSession {
             check("the grandchild is not running", grandchild > 0 && PTYChild.isAlive(grandchild))
 
             let outcome = child.terminate(grace: 0.3, killGrace: 2.0)
-            check("a SIGTERM-ignoring child was not escalated to SIGKILL: \(outcome.describe)",
+            check("a SIGTERM-ignoring child was not escalated to SIGKILL on the graceful path: \(outcome.describe)",
                   outcome == .terminatedByUs(signal: SIGKILL))
             check(
                 "the grandchild survived teardown — killpg did not reach the process group",

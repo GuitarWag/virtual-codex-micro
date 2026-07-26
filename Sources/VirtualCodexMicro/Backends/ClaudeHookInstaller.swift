@@ -303,6 +303,13 @@ public struct ClaudeHookInstaller: Sendable {
 
     /// Writes the plan. The only function in this type that changes anything on disk,
     /// and it must be reached through explicit user consent.
+    /// True when this plan's forwarder is the real installed one. The self-check
+    /// asserts its own plans are NOT, so a fixture plan can never reach into the
+    /// live install again.
+    public static func targetsLiveInstall(_ plan: Plan) -> Bool {
+        plan.forwarderURL.path == defaultForwarderURL.path
+    }
+
     public static func apply(_ plan: Plan) throws {
         guard !plan.isNoOp else { return }
         let fm = FileManager.default
@@ -332,8 +339,24 @@ public struct ClaudeHookInstaller: Sendable {
 
         if plan.action == .uninstall {
             try? fm.removeItem(at: plan.forwarderURL)
-            // The directory too, if we created it and it is now empty.
-            try? fm.removeItem(at: Self.forwarderDirectory)
+            // Derive the directory FROM THE PLAN, and only remove it when it is
+            // actually empty.
+            //
+            // The previous version did `removeItem(at: Self.forwarderDirectory)` —
+            // the hard-coded real path, ignoring plan.forwarderURL, and recursive
+            // despite a comment claiming it only removed an empty directory. Since
+            // selfCheckFailures() applies two fixture uninstalls, simply RUNNING THE
+            // SELF-CHECK deleted the user's live forwarder while leaving all eleven
+            // settings.json entries pointing at it. `async: true` discards the
+            // resulting exit 127, so the breakage was completely silent: their
+            // Claude Code kept working and only our panel went dark — with
+            // needsInput dying hardest, because a pending prompt writes nothing to
+            // the transcript for the tailer to fall back on.
+            let directory = plan.forwarderURL.deletingLastPathComponent()
+            let remaining = (try? fm.contentsOfDirectory(atPath: directory.path)) ?? ["not-empty"]
+            if remaining.isEmpty {
+                try? fm.removeItem(at: directory)
+            }
         }
         // Legacy scripts go on both paths: leaving an executable behind that
         // nothing references is litter in the user's home directory.

@@ -4,12 +4,16 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-049] **error's glyph renders at 3.46:1 and the ladder has no room to fix it** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-30`
-  > Found by the new rendered-pixel check (task 037), which is why it was invisible before: the model measures error's white glyph at 5.12:1 against composedKeyFill, the rendered cap measures 3.46:1 against a 4.5 WCAG floor. The cap centre under the glyph is the state glow at 0.85 opacity, and the glow is lighter than the fill. It is not tunable: sweeping error's lightGlow darker walked the glyph up 3.46 -> 3.76 -> 3.99 -> 4.23 and walked running-vs-error down 1.59 -> 1.46 -> 1.37 -> 1.29 in lockstep, because red cannot pass 0.21 relative luminance while staying red and running is pinned beneath it by blue's 0.07 ceiling. Needs a glyph treatment that does not depend on the cap under it - an outline or a shadow, or dark ink with the ladder rebuilt around it. Recorded in PixelCheck.knownGlyphShortfall as a ceiling meanwhile, so it cannot quietly get worse; delete that entry when this is fixed.
+- [ ] [T-VCMPLAN1-043] **The tailer must clear amber after a rejection** `priority:critical` `assignee:claude` `tags:m2,backend,state` `due:2026-09-13`
+  > Witnessed in spikes/needsinput: rejecting a permission prompt emits NO hook event whatsoever. Not PermissionDenied, not Stop, not PostToolUseFailure, and no Notification even after 170s idle. So the hook stream leaves a rejected slot amber forever. The transcript DOES mark it - `tool_result.is_error = true` plus the literal `[Request interrupted by user for tool use]` - so ClaudeTranscriptSource is the only thing that can clear needsInput on the reject path. This is a new requirement on a source currently scoped to running/idle/liveness only, and it sits on the M2 critical path: without it the amber key is permanently stuck after the first rejection.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-039] **needsInput is wired but never witnessed** `priority:critical` `assignee:claude` `tags:m2,backend,state` `due:2026-09-06`
-  > PermissionRequest is installed and the mapping is in place, but it has never fired: it only occurs on an interactive session hitting a real approval prompt, and -p mode has no permission lifecycle at all. The amber key - the state the entire fast-glance thesis rests on - is therefore unproven end to end. Same for PermissionDenied, which never fired across 12 spike sessions, so the reject path's unconfirmed-resolves-to-unknown behaviour is also unwitnessed. Verify both against a real interactive session.
+- [ ] [T-VCMPLAN1-044] **Accept/reject must read permission_suggestions, not a hard-coded option index** `priority:high` `assignee:claude` `tags:m2,backend` `due:2026-09-13`
+  > The needsInput spike drove deny with the keystroke `3`, which worked because that Bash prompt happened to list No third. A prompt with a different option list puts No at a different index, so injecting a fixed digit would answer the wrong option - and on an approval dialog answering the wrong option is the worst available failure. PermissionRequest carries the full `permission_suggestions` array; the keystrokes must be derived from it. Note the spike also confirmed both reject affordances work through a PTY (option number and ESC), which closes the hook spike's G6 caveat about deny being unreliable to drive.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-049] **error's glyph renders at 3.46:1 and the ladder has no room to fix it** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-30`
+  > Found by the new rendered-pixel check (task 037), which is why it was invisible before: the model measures error's white glyph at 5.12:1 against composedKeyFill, the rendered cap measures 3.46:1 against a 4.5 WCAG floor. The cap centre under the glyph is the state glow at 0.85 opacity, and the glow is lighter than the fill. It is not tunable: sweeping error's lightGlow darker walked the glyph up 3.46 -> 3.76 -> 3.99 -> 4.23 and walked running-vs-error down 1.59 -> 1.46 -> 1.37 -> 1.29 in lockstep, because red cannot pass 0.21 relative luminance while staying red and running is pinned beneath it by blue's 0.07 ceiling. Needs a glyph treatment that does not depend on the cap under it - an outline or a shadow, or dark ink with the ladder rebuilt around it. Recorded in PixelCheck.knownGlyphShortfall as a ceiling meanwhile, so it cannot quietly get worse; delete that entry when this is fixed.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## IN PROGRESS
@@ -166,6 +170,10 @@
 
 - [x] [T-VCMPLAN1-042] **Redo the M1 exit review against the current layout** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-30`
   > docs/M1-REVIEW.md reviewed a 412x276 four-zone panel that no longer exists. Three of its structural criticisms dissolved when the layout was rebuilt from the reference photos as a square 4x4 grid, but its verdict and its GO conditions now describe superseded geometry. Re-review the real thing, including the frosted caps and the case underglow, and check the invented plate legends read as ours rather than as a copy.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-039] **needsInput is wired but never witnessed** `priority:critical` `assignee:claude` `tags:m2,backend,state` `due:2026-09-06`
+  > PermissionRequest is installed and the mapping is in place, but it has never fired: it only occurs on an interactive session hitting a real approval prompt, and -p mode has no permission lifecycle at all. The amber key - the state the entire fast-glance thesis rests on - is therefore unproven end to end. Same for PermissionDenied, which never fired across 12 spike sessions, so the reject path's unconfirmed-resolves-to-unknown behaviour is also unwitnessed. Verify both against a real interactive session.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED
