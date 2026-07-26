@@ -263,15 +263,24 @@ final class PanelController: NSObject, NSWindowDelegate {
         return rect.origin
     }
 
-    /// Lower-right of the primary screen: a macro pad belongs at the edge of the
-    /// desk, and centring an always-on-top window covers what the user is
-    /// reading.
+    /// Centred on the primary screen.
+    ///
+    /// Was lower-right at a 24pt margin, on the reasoning that a macro pad belongs
+    /// at the edge of the desk. That reasoning is fine for a window you can find and
+    /// wrong for the first one you ever see: `visibleFrame` reserves the Dock's
+    /// strip, but a Dock set to hide automatically reports no reserved strip at all,
+    /// so y = minY + 24 put a first launch underneath it. With no Dock icon, no menu
+    /// bar item at the time, and an unverifiable hotkey, a panel you cannot see is a
+    /// process you have to `pgrep`.
+    ///
+    /// Centred is the one position that is unambiguously visible on every
+    /// arrangement, and it is only ever the *first* position — the frame is saved on
+    /// every move, so a user who wants it in the corner drags it there once.
     nonisolated static func defaultFrame(size: CGSize, screens: [CGRect]) -> CGRect {
         guard let primary = screens.first else { return CGRect(origin: .zero, size: size) }
-        let margin: CGFloat = 24
         return CGRect(
-            x: primary.maxX - size.width - margin,
-            y: primary.minY + margin,
+            x: (primary.midX - size.width / 2).rounded(),
+            y: (primary.midY - size.height / 2).rounded(),
             width: size.width,
             height: size.height
         )
@@ -431,10 +440,17 @@ final class PanelController: NSObject, NSWindowDelegate {
 
         // The default position must itself be legal, or first launch starts in
         // the state the clamp exists to prevent.
-        check(
-            "default frame off screen",
-            isInside(defaultFrame(size: panelSize, screens: [screen]), [screen])
-        )
+        let initial = defaultFrame(size: panelSize, screens: [screen])
+        check("default frame off screen", isInside(initial, [screen]))
+        check("default frame not horizontally centred", abs(initial.midX - screen.midX) <= 1)
+        check("default frame not vertically centred", abs(initial.midY - screen.midY) <= 1)
+        // The regression this guards is specific: an autohiding Dock reserves no
+        // space in `visibleFrame`, so a small bottom margin is *inside* the screen
+        // and still behind the Dock. Nothing about "legal" catches that, so the
+        // distance from the bottom edge is asserted directly.
+        check("default frame sits near the bottom edge, where the Dock is",
+              initial.minY - screen.minY > 100)
+        check("default frame resized", initial.size == panelSize)
         check(
             "default frame has no screen fallback",
             defaultFrame(size: panelSize, screens: []).size == panelSize

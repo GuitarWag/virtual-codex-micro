@@ -8,6 +8,10 @@ import SwiftUI
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var panel: PanelController?
+    /// Held for the process's lifetime: `NSStatusBar` does not retain the item, and
+    /// a released one disappears from the menu bar — which is the failure this exists
+    /// to prevent.
+    private var menuBar: MenuBarItem?
     private let coordinator = PanelCoordinator()
 
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -25,7 +29,32 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         installHotkeys(controller)
+        // After the hotkey attempt on purpose: this is the route that works when
+        // that registration lost a conflict, so it must not depend on it.
+        let menu = MenuBarItem(panel: controller, coordinator: coordinator)
+        menuBar = menu
         coordinator.start()
+
+        // First launch with no hooks installed. Opens the consent screen; installing
+        // still needs the button on it, and the screen writes nothing by appearing.
+        menu.presentOnboardingIfNeeded()
+
+        // Open one menu surface at launch, so the menu wiring can be looked at
+        // without a human driving the mouse. Calls the same methods the items do.
+        if let surface = ProcessInfo.processInfo.environment["VCM_MENU"] {
+            menu.open(surface)
+            // Report where each window actually landed. Not decoration: onboarding
+            // opened as a 173x32 sliver that reported itself visible, and a
+            // screenshot of the wrong Space cannot tell that apart from "did not
+            // open at all". The window server's own numbers can.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 1.5) {
+                for window in NSApp.windows where !window.title.isEmpty {
+                    FileHandle.standardError.write(Data(
+                        "\(window.title): visible=\(window.isVisible) frame=\(window.frame)\n".utf8
+                    ))
+                }
+            }
+        }
 
         if ProcessInfo.processInfo.environment["VCM_SMOKE"] != nil {
             let seconds = Double(ProcessInfo.processInfo.environment["VCM_SMOKE"] ?? "2") ?? 2

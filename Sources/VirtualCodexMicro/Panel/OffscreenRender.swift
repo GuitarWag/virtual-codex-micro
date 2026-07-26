@@ -16,8 +16,7 @@ enum OffscreenRender {
     static func run(pathPrefix: String) -> Never {
         var written: [String] = []
 
-        for (suffix, appearanceName) in [("light", NSAppearance.Name.aqua),
-                                         ("dark", NSAppearance.Name.darkAqua)] {
+        for (suffix, scheme) in [("light", ColorScheme.light), ("dark", ColorScheme.dark)] {
             let layout = PanelLayout.regular
             let view = PanelRootView(
                 coordinator: .demo(
@@ -28,27 +27,23 @@ enum OffscreenRender {
                 layout: layout
             )
 
-            let host = NSHostingView(rootView: view)
-            host.frame = CGRect(origin: .zero, size: layout.panelSize)
-            host.appearance = NSAppearance(named: appearanceName)
+            // ImageRenderer, NOT NSHostingView.cacheDisplay.
+            //
+            // The M1 review proved cacheDisplay(in:to:) can drop a blurred layer
+            // entirely — which is precisely the case underglow, the one thing on
+            // this panel made of blur. Both the committed reference PNGs and the
+            // pixel-based colour check were therefore measuring an image the user
+            // never sees, and understating the glow. A verification tool that
+            // silently omits a layer is worse than none: it produces confident
+            // wrong numbers.
+            let renderer = ImageRenderer(content: view.environment(\.colorScheme, scheme))
+            renderer.scale = 2
+            renderer.proposedSize = ProposedViewSize(layout.panelSize)
 
-            // A hosting view outside a window renders with unresolved materials,
-            // so park it in an offscreen window first.
-            let window = NSWindow(
-                contentRect: host.frame,
-                styleMask: [.borderless],
-                backing: .buffered,
-                defer: false
-            )
-            window.appearance = NSAppearance(named: appearanceName)
-            window.contentView = host
-            window.layoutIfNeeded()
-            host.layoutSubtreeIfNeeded()
-
-            guard let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds) else {
-                fail("could not allocate a bitmap for \(suffix)")
+            guard let cgImage = renderer.cgImage else {
+                fail("ImageRenderer produced no image for \(suffix)")
             }
-            host.cacheDisplay(in: host.bounds, to: rep)
+            let rep = NSBitmapImageRep(cgImage: cgImage)
             guard let png = rep.representation(using: .png, properties: [:]) else {
                 fail("could not encode PNG for \(suffix)")
             }
