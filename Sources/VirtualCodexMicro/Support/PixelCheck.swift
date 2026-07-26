@@ -26,10 +26,16 @@ import SwiftUI
 /// - **the slot numeral against its corner.** Same floor. It is drawn from a
 ///   literal rather than a `StateColors` token, which is exactly why nothing used
 ///   to measure it.
-/// - **cap against cap, every lit pair.** Checked against
-///   `StateColors.minimumStateSeparation`.
+/// - **cap against cap, every lit pair**, at the state-bearing centre. Checked
+///   against `StateColors.minimumStateSeparation`. This is a luminance floor on the
+///   fill, and the fill is saturated — see that property.
+/// - **cap against cap defocused**, every lit pair, over the whole cap in greyscale.
+///   Checked against `StateColors.minimumGlanceSeparation`. This is the floor that
+///   the *mark* satisfies rather than the fill, and it is the one that answers
+///   "would these two read as the same tile at a glance" — which the number above
+///   cannot, because it measures a 5pt ring the frost was designed to keep clear.
 ///
-/// All three walk `AgentState.allCases` / `StateColors.litStates`, so an eighth
+/// All four walk `AgentState.allCases` / `StateColors.litStates`, so an eighth
 /// state is measured without anyone remembering to add it.
 ///
 /// ## Why this is opt-in rather than part of the default self-check
@@ -107,6 +113,25 @@ enum PixelCheck {
     private static let capInner = 0.21
     private static let capOuter = 0.45
 
+    /// **The glance kernel**: the width, as a fraction of the cap side, of the
+    /// finest detail a glance resolves. See `glanceSeparation`.
+    ///
+    /// 0.20 — about 9pt on a 46pt cap. Derived rather than picked: a 46pt cap at a
+    /// normal viewing distance subtends roughly one degree, and acuity out at the
+    /// eccentricity where a floating panel actually sits is on the order of a fifth
+    /// of foveal, so a fifth of the cap is the smallest feature the reading this
+    /// panel is for can still separate. It is a round number standing in for a range,
+    /// and `StateColors.minimumGlanceSeparation` carries margin partly for that.
+    private static let glanceKernel = 0.20
+
+    /// How far out the glance comparison runs, as a fraction of the cap side.
+    ///
+    /// 0.38 rather than `capOuter`'s 0.45 so that a kernel centred on the outermost
+    /// compared pixel still lies inside the cap. Past that the blur starts averaging
+    /// in the plate and the case underglow, which are shared and would flatter every
+    /// pair equally.
+    private static let glanceOuter = 0.38
+
     /// Ink is read as a percentile rather than an extreme so a single stray
     /// antialiased pixel cannot stand in for the mark, and so a thin stroke's
     /// partially covered edge does not get mistaken for its core.
@@ -126,34 +151,46 @@ enum PixelCheck {
     /// model, which is where the increased-contrast palette gets its coverage.
     static let renderableAppearances: [StateColors.Appearance] = [.light, .dark]
 
-    /// The one rendered glyph contrast that does not reach
-    /// `StateColors.minimumLabelContrast`, recorded with the value measured today
-    /// and held as a **ceiling**: it may improve, it may not slip.
+    /// Glyph contrasts held as a **ratchet**: recorded at the value measured today,
+    /// free to improve, not free to slip — independent of whether they clear
+    /// `StateColors.minimumLabelContrast`.
     ///
-    /// `minimumLabelContrast` is 4.5 because that is WCAG 2.1 AA for normal text,
-    /// so unlike `minimumStateSeparation` it is not ours to lower — see that
-    /// property for the one that was. `error` in light cannot reach it inside the
-    /// current palette, and the sweep that proves it is worth keeping: `error`'s
-    /// white glyph sits on a cap whose centre is the state glow at 0.85, and
-    /// darkening that glow to lift the glyph (3.48 → 3.76 → 3.99 → 4.23) drove
-    /// `running` vs `error` down in lockstep (1.59 → 1.46 → 1.37 → 1.29). Red
-    /// cannot exceed 0.21 relative luminance while staying red, `running` is
-    /// pinned under it by blue's 0.07 ceiling, and there is not room for both a
-    /// legible white mark and a rung between them. The fix is a glyph treatment
-    /// that does not depend on the cap underneath it — an outline, or ink flipped
-    /// to dark with the ladder rebuilt around it — which is a restyle, not a hex
-    /// edit, and belongs on the board rather than in this diff.
+    /// One entry, and it is here because of what it cost to get. `error` in light was
+    /// **3.48:1** against a 4.5 floor and was the one glyph on the panel that could
+    /// not be fixed from inside the fill: a white mark on a lit red cap, where
+    /// darkening the glow to lift the mark (3.48 → 3.76 → 3.99 → 4.23) drove
+    /// `running` vs `error` down in lockstep (1.59 → 1.46 → 1.37 → 1.29). Red cannot
+    /// exceed 0.21 relative luminance while staying red and `running` is pinned under
+    /// it by blue's 0.07 ceiling, so there was no room for both a legible white mark
+    /// and a rung between them.
     ///
-    /// Anything not listed here is held to the full 4.5, including a state added
-    /// later. Keep this dictionary at one entry if you can.
-    private static let knownGlyphShortfall: [String: Double] = [
-        "error.light": 3.48,
+    /// It is **5.29 now**, and the two things that unwedged it were both about
+    /// measuring the right ground rather than about tuning the palette. The mark went
+    /// to black — the reference photographs show dark marks on lit plastic, never
+    /// white ones — and `StateColors.composedKeyCentre` replaced `composedKeyFill` in
+    /// the model, because the glyph sits on the glow-lit middle of the cap and
+    /// against the bare fill no dark ink could pass at all (pure black ceilings at
+    /// 4.10 there). No fill moved. No rung moved. `running` vs `error` is still 1.57.
+    ///
+    /// The entry stays even though the value now clears the floor, because the floor
+    /// alone would let this slide back from 5.29 to 4.6 in silence, and the history
+    /// above is exactly the kind of coupling that produces that slide. Anything not
+    /// listed is held to the full 4.5.
+    private static let glyphRatchet: [String: Double] = [
+        "error.light": 5.29,
     ]
 
-    /// Slack on the recorded ceilings, for a machine that composites a shade
-    /// differently. Small enough that a real regression still trips it — the
-    /// sweep above moved this number by 0.30 for a barely visible glow change.
-    private static let shortfallTolerance = 0.08
+    /// Slack on the ratchet, for a machine that composites a shade differently.
+    ///
+    /// Proportional, because the recorded value is now above the floor rather than
+    /// under it and the metric's sensitivity scales with it: against near-black ink
+    /// the ratio is roughly `20·(surround + 0.05)`, so a fixed 0.08 that was right at
+    /// 3.48 is hair-trigger at 5.29. 4% of the recorded value, floored at 0.08. Small
+    /// enough that a real regression still trips it — the glow sweep above moved this
+    /// number by 0.28 per step for a barely visible change.
+    private static func ratchetTolerance(_ recorded: Double) -> Double {
+        max(0.08, recorded * 0.04)
+    }
 
     // MARK: - Measurement
 
@@ -171,13 +208,19 @@ enum PixelCheck {
         let numeralCorner: StateColors.RGB
         /// What the model predicted for the same cap, for comparison.
         let modelFill: StateColors.RGB
+        /// The cap defocused: relative luminance, box-blurred by the glance kernel,
+        /// row-major over the cap's bounding box, with everything outside
+        /// `glanceOuter` set to `nil`.
+        let glance: [Double?]
 
         var labelContrast: Double { StateColors.contrastRatio(ink, surround) }
         var numeralContrast: Double { StateColors.contrastRatio(numeralInk, numeralCorner) }
         var modelLabelContrast: Double {
-            StateColors.contrastRatio(
-                StateColors.swatch(for: state, in: appearance).keyLabel, modelFill
-            )
+            let swatch = StateColors.swatch(for: state, in: appearance)
+            // `composedKeyCentre`, not `modelFill`: the glyph sits on the glow-lit
+            // middle of the cap, and comparing it against the bare fill is what
+            // made this column disagree with the measured one in both directions.
+            return StateColors.contrastRatio(swatch.keyLabel, swatch.composedKeyCentre)
         }
     }
 
@@ -248,7 +291,8 @@ enum PixelCheck {
                         state: state, appearance: appearance,
                         cap: cap, surround: surround, ink: ink,
                         numeralInk: numeralInk, numeralCorner: numeralCorner,
-                        modelFill: swatch.composedKeyFill
+                        modelFill: swatch.composedKeyFill,
+                        glance: glanceField(rep, scale, frame)
                     ))
                 }
             }
@@ -282,8 +326,10 @@ enum PixelCheck {
         }
 
         var faces: [StateColors.Appearance: [AgentState: StateColors.RGB]] = [:]
+        var glances: [StateColors.Appearance: [AgentState: [Double?]]] = [:]
         for m in measured {
             faces[m.appearance, default: [:]][m.state] = m.surround
+            glances[m.appearance, default: [:]][m.state] = m.glance
 
             // The slot numeral. It is on the cap, it is the only thing addressing
             // the key, and until now it was outside every assertion — it is drawn
@@ -296,18 +342,19 @@ enum PixelCheck {
                 )
             }
 
-            guard m.labelContrast < StateColors.minimumLabelContrast else { continue }
+            // The ratchet is checked whether or not the floor is met: a recorded
+            // glyph may improve and may not slip, and one of them sits above the
+            // floor precisely because it used to sit below it.
+            if let recorded = glyphRatchet["\(m.state.rawValue).\(m.appearance.rawValue)"],
+               m.labelContrast < recorded - ratchetTolerance(recorded) {
+                failures.append(
+                    "\(m.state.rawValue) rendered glyph contrast fell from a recorded "
+                    + "\(fmt(recorded)):1 to \(fmt(m.labelContrast)):1 in \(m.appearance.rawValue)"
+                )
+            }
 
-            // Below the floor. Either it is a shortfall we have written down, in
-            // which case it must not get any worse, or it is new.
-            if let ceiling = knownGlyphShortfall["\(m.state.rawValue).\(m.appearance.rawValue)"] {
-                if m.labelContrast < ceiling - shortfallTolerance {
-                    failures.append(
-                        "\(m.state.rawValue) rendered glyph contrast fell from a recorded "
-                        + "\(fmt(ceiling)):1 to \(fmt(m.labelContrast)):1 in \(m.appearance.rawValue)"
-                    )
-                }
-            } else {
+            if m.labelContrast < StateColors.minimumLabelContrast,
+               glyphRatchet["\(m.state.rawValue).\(m.appearance.rawValue)"] == nil {
                 failures.append(
                     "\(m.state.rawValue) rendered glyph contrast \(fmt(m.labelContrast)):1 in "
                     + "\(m.appearance.rawValue), needs \(fmt(StateColors.minimumLabelContrast)):1 "
@@ -321,6 +368,25 @@ enum PixelCheck {
             guard let byState = faces[appearance] else { continue }
             for (index, first) in StateColors.litStates.enumerated() {
                 for second in StateColors.litStates.dropFirst(index + 1) {
+                    // The whole-cap guarantee. Separate from the one below because
+                    // it asks a different question of a different channel: that one
+                    // is the fill's luminance at the cap centre, this one is whether
+                    // anything at all distinguishes the two caps once they are
+                    // defocused to a 5x5 greyscale mosaic. The fill is saturated and
+                    // cannot be widened, so this is where the mark's contribution is
+                    // made load-bearing — see `StateColors.minimumGlanceSeparation`.
+                    if let ga = glances[appearance]?[first], let gb = glances[appearance]?[second] {
+                        let glance = glanceSeparation(ga, gb)
+                        if glance < StateColors.minimumGlanceSeparation {
+                            failures.append(
+                                "\(first.rawValue) vs \(second.rawValue) rendered glance separation "
+                                + "\(fmt(glance)):1 in \(appearance.rawValue), needs "
+                                + "\(fmt(StateColors.minimumGlanceSeparation)):1 — the two caps "
+                                + "defocus to the same thing"
+                            )
+                        }
+                    }
+
                     guard let a = byState[first], let b = byState[second] else { continue }
                     let separation = StateColors.contrastRatio(a, b)
                     if separation < StateColors.minimumStateSeparation {
@@ -361,15 +427,17 @@ enum PixelCheck {
         }
 
         lines.append("")
-        lines.append("lit pair separation: centre (enforced) | visible cap | [model]")
+        lines.append("lit pair separation: centre | visible cap | glance (enforced) | [model]")
         for appearance in renderableAppearances {
             let rows = measured.filter { $0.appearance == appearance }
             let centres = Dictionary(uniqueKeysWithValues: rows.map { ($0.state, $0.surround) })
             let caps = Dictionary(uniqueKeysWithValues: rows.map { ($0.state, $0.cap) })
+            let glances = Dictionary(uniqueKeysWithValues: rows.map { ($0.state, $0.glance) })
             for (index, first) in StateColors.litStates.enumerated() {
                 for second in StateColors.litStates.dropFirst(index + 1) {
                     guard let a = centres[first], let b = centres[second],
-                          let ca = caps[first], let cb = caps[second] else { continue }
+                          let ca = caps[first], let cb = caps[second],
+                          let ga = glances[first], let gb = glances[second] else { continue }
                     let model = StateColors.contrastRatio(
                         StateColors.swatch(for: first, in: appearance).composedKeyFill,
                         StateColors.swatch(for: second, in: appearance).composedKeyFill
@@ -378,6 +446,7 @@ enum PixelCheck {
                         + pad(second.rawValue, 12)
                         + fmt(StateColors.contrastRatio(a, b))
                         + " | " + fmt(StateColors.contrastRatio(ca, cb))
+                        + " | " + fmt(glanceSeparation(ga, gb))
                         + " | [" + fmt(model) + "]")
                 }
             }
@@ -467,5 +536,105 @@ enum PixelCheck {
         samples.sort { $0.luminance < $1.luminance }
         let index = min(samples.count - 1, max(0, Int(percentile * Double(samples.count - 1))))
         return samples[index].colour
+    }
+
+    /// The cap defocused: relative luminance box-blurred by a `glanceKernel`-wide
+    /// square, over the cap's bounding box, `nil` outside `glanceOuter`.
+    ///
+    /// Three things about it are deliberate.
+    ///
+    /// **Averaged in relative-luminance space, not in sRGB bytes.** That is what
+    /// defocus does — light adds linearly, and the WCAG luminance function is
+    /// already the linear one. Averaging bytes and expanding afterwards reports a
+    /// patch darker than the eye receives.
+    ///
+    /// **Hue is discarded on the way in.** That is the point. This is the greyscale,
+    /// deuteranopic, peripheral reading, which is the one the ladder exists for.
+    ///
+    /// **A sliding blur rather than a mosaic of cells.** The first version of this
+    /// reduced the cap to an NxN grid, and it was phase-sensitive in a way that made
+    /// the floor arbitrary: the mark is centred, so an odd grid puts a cell on it and
+    /// an even grid splits it across four, and the worst measured pair came out 1.28
+    /// at 4x4 against 1.78 at 5x5 on identical pixels. A defocused eye has no grid
+    /// phase. Every offset is evaluated here instead, so the number depends on the
+    /// kernel width and nothing else.
+    private static func glanceField(
+        _ rep: NSBitmapImageRep, _ scale: Double, _ frame: CGRect
+    ) -> [Double?] {
+        let x0 = Int(Double(frame.minX) * scale)
+        let y0 = Int(Double(frame.minY) * scale)
+        let span = Int((Double(frame.width) * scale).rounded())
+        let radius = max(1, Int((glanceKernel * Double(span) / 2).rounded()))
+
+        // Luminance of the cap's box, then a separable box blur over it. Separable
+        // because the square version is O(span²·kernel²) and this is O(span²·kernel),
+        // which is the difference between 38M and 300k operations for the sweep.
+        var luminance = [Double](repeating: 0, count: span * span)
+        for row in 0..<span {
+            for column in 0..<span {
+                guard let colour = rep.colorAt(x: x0 + column, y: y0 + row)?
+                    .usingColorSpace(.sRGB) else { continue }
+                luminance[row * span + column] = StateColors.relativeLuminance(
+                    StateColors.RGB(
+                        red: Double(colour.redComponent),
+                        green: Double(colour.greenComponent),
+                        blue: Double(colour.blueComponent)
+                    )
+                )
+            }
+        }
+
+        func blur(_ source: [Double], horizontal: Bool) -> [Double] {
+            var out = [Double](repeating: 0, count: span * span)
+            for row in 0..<span {
+                for column in 0..<span {
+                    let centre = horizontal ? column : row
+                    let lower = max(0, centre - radius)
+                    let upper = min(span - 1, centre + radius)
+                    var total = 0.0
+                    for step in lower...upper {
+                        total += horizontal
+                            ? source[row * span + step]
+                            : source[step * span + column]
+                    }
+                    out[row * span + column] = total / Double(upper - lower + 1)
+                }
+            }
+            return out
+        }
+
+        let blurred = blur(blur(luminance, horizontal: true), horizontal: false)
+
+        // Mask to the compared disc. `nil` rather than a sentinel so a masked pixel
+        // can never be mistaken for a black one, which would report a huge contrast
+        // wherever the two caps' masks disagreed.
+        let centre = Double(span - 1) / 2
+        let limit = glanceOuter * Double(span)
+        return (0..<(span * span)).map { index in
+            let dx = Double(index % span) - centre
+            let dy = Double(index / span) - centre
+            return (dx * dx + dy * dy).squareRoot() <= limit ? blurred[index] : nil
+        }
+    }
+
+    /// **Glance separation**: can these two caps be told apart in greyscale, at cap
+    /// scale, by someone who is not looking straight at them.
+    ///
+    /// The strongest contrast between the two defocused caps at any one place on the
+    /// cap. A max rather than a mean, on purpose — the question is whether *any*
+    /// feature big enough to survive defocus differs, not whether the average does.
+    /// One 9pt patch reading plainly lighter on one state than the other is enough
+    /// to tell them apart, and a mean buries it under the frosted rim all six caps
+    /// share, which is precisely how the whole-visible-cap number got to 1.17.
+    ///
+    /// This is the metric the fill's luminance cannot move much. A cap that carries
+    /// its second channel as a mark rather than as brightness scores here while
+    /// scoring nothing on `cap`-band separation, which is exactly the trade task 048
+    /// asked for — so this is where that trade is allowed to become visible.
+    static func glanceSeparation(_ a: [Double?], _ b: [Double?]) -> Double {
+        zip(a, b).compactMap { first, second -> Double? in
+            guard let first, let second else { return nil }
+            return (max(first, second) + 0.05) / (min(first, second) + 0.05)
+        }.max() ?? 1
     }
 }

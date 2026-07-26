@@ -372,16 +372,28 @@ public final class PTYChild: @unchecked Sendable {
         var raw: Int32 = 0
         let result = waitpid(pid, &raw, WNOHANG)
         if result == 0 { return .running }
+        // Both branches below CHECK-AND-SET rather than plain assign, because the
+        // `waitpid` above happens outside the lock. Two threads can both pass the
+        // cache check while the child is still running; one then reaps the real
+        // status and the other gets ECHILD. Whoever wrote last used to win, so a
+        // loser's `.vanished` could overwrite a winner's real exit code — which
+        // surfaced as a flaky "concurrent child N did not exit cleanly: vanished,
+        // outcome unknown" under six concurrent children, the case no spike covered.
+        // A real answer must never be downgraded to "outcome unknown".
         if result < 0 {
             guard errno == ECHILD else { return .running }
-            let vanished = PTYExit.vanished
-            shared.withLock { $0.exit = vanished }
-            return vanished
+            return shared.withLock {
+                if $0.exit.isRunning { $0.exit = .vanished }
+                return $0.exit
+            }
         }
         let asked = shared.withLock { $0.weAskedForTermination }
         let decoded = PTYExit.decode(raw, weAskedFor: asked)
-        if !decoded.isRunning { shared.withLock { $0.exit = decoded } }
-        return decoded
+        guard !decoded.isRunning else { return decoded }
+        return shared.withLock {
+            if $0.exit.isRunning { $0.exit = decoded }
+            return $0.exit
+        }
     }
 
     /// Cheap liveness for gap G3: no hook fires when a session is `SIGKILL`ed, so
@@ -1231,12 +1243,22 @@ public extension OwnedSession {
                 continue
             }
 
-            if killpg(pid, SIGTERM) != 0 { _ = kill(pid, SIGTERM) }
+            // SIGKILL directly, same reasoning as `terminate()`: the needsInput spike
+            // measured SIGTERM-then-SIGKILL never reaping a real `claude` (5/5),
+            // because it catches SIGTERM and a later SIGKILL wedges it in macOS `E`
+            // state. I fixed that in terminate() and missed it here.
+            //
+            // It matters more in the sweep than in terminate(): a stray is by
+            // definition already orphaned to launchd, so nothing will ever reap it if
+            // it wedges. And there is no graceful case to preserve — a stray from a
+            // previous crash has no exit path worth running.
+            //
+            // This also removes a grace loop whose timing made the check flaky under
+            // load: with SIGTERM first, whether the stray died before the deadline
+            // depended on machine load rather than on the code being right.
+            if killpg(pid, SIGKILL) != 0 { _ = kill(pid, SIGKILL) }
             let deadline = Date().addingTimeInterval(grace)
             while Date() < deadline, PTYChild.isAlive(pid) { usleep(20_000) }
-            if PTYChild.isAlive(pid) {
-                if killpg(pid, SIGKILL) != 0 { _ = kill(pid, SIGKILL) }
-            }
             // Not our child, so `waitpid` cannot reap it — its parent is `launchd`
             // now, which will.
             sweep.killed.append(pid)

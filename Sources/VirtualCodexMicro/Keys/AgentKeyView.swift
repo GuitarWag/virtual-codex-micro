@@ -133,19 +133,67 @@ public struct AgentKeyView: View {
     /// Circle-framed on purpose: the reference caps all carry one small round
     /// glyph, so the family gives the panel the right silhouette. The mark
     /// *inside* the ring is what separates the states, which is why the ring is
-    /// never the whole glyph. `error` breaks the family deliberately — an
-    /// octagon reads as "stop" at a glance and at the far edge of vision, and
-    /// "failed" is the reading this panel can least afford to lose.
+    /// never the whole glyph. Two states break the family deliberately, and both
+    /// breaks buy something: `error`'s octagon reads as "stop" at a glance and at
+    /// the far edge of vision, and `complete`'s diamond keeps it off `accept`'s
+    /// `checkmark.circle` one row below, which was the same mark for two unrelated
+    /// meanings six points apart.
+    ///
+    /// ## Filled versus hollow is a channel, not a style choice
+    ///
+    /// This is where the achromatic half of the state signal now lives, and the
+    /// reason is arithmetic. The cap fill cannot carry it: five 1.8:1 luminance
+    /// steps need 18.9:1 of range and the reference's lit-cap band offers 1.17:1,
+    /// so every rung gained on the fill comes off its neighbour. Measured on
+    /// rendered pixels, the whole visible cap separates by only 1.17–1.77 because
+    /// the frosted rim it shares with every other cap dominates it.
+    ///
+    /// What survives that is the mark, and only if the mark differs in *ink
+    /// coverage* rather than merely in silhouette. `PixelCheck.glanceSeparation`
+    /// defocuses each cap and compares them — greyscale, peripheral, hue discarded —
+    /// and the numbers say plainly which difference carries. When every lit mark was
+    /// filled, pairs that shared an ink polarity scored **1.33–1.65** while pairs
+    /// with opposite polarity scored **4.38–7.91 on the identical caps**. Seven
+    /// distinct SF Symbols were not a second channel; they were seven silhouettes
+    /// that defocus into the same blob. Shape is not the channel. Coverage is.
+    ///
+    /// So each lit state gets one of four readings, and `selfCheckFailures()` asserts
+    /// both levels are in use: dark-filled, dark-hollow, light-filled, light-hollow.
+    /// `.fill` is not decoration — it is the difference between the middle of the cap
+    /// reading as a solid blob and reading as the cap itself. With it, the worst lit
+    /// pair on that metric went **1.33 → 1.93**, and `StateColors`
+    /// `minimumGlanceSeparation` holds the result at 1.80.
+    ///
+    /// The rule that assigns it is semantic, so it stays predictable as states are
+    /// added: **filled means the panel wants something from you or is working;
+    /// hollow means nothing is being asked.** `running`, `needsInput` and `error`
+    /// are filled; `idle`, `complete`, `unknown` and `unassigned` are hollow. That
+    /// also happens to fix the M1 review's inverted attention hierarchy — the two
+    /// attention states now carry the two boldest marks on the panel.
     public static func iconName(for state: AgentState) -> String {
         switch state {
         case .unassigned: "circle.dashed"
         case .idle: "pause.circle"
         case .running: "play.circle.fill"
-        case .complete: "checkmark.circle.fill"
+        case .complete: "checkmark.diamond"
         case .needsInput: "exclamationmark.circle.fill"
         case .error: "xmark.octagon.fill"
-        case .unknown: "questionmark.circle.fill"
+        case .unknown: "questionmark.circle"
         }
+    }
+
+    /// Whether the mark reads as a solid blob. Derived from the symbol name rather
+    /// than declared twice, so the two can never disagree.
+    public static func markIsFilled(for state: AgentState) -> Bool {
+        iconName(for: state).hasSuffix(".fill")
+    }
+
+    /// A hollow mark is drawn heavier so its strokes survive the same defocus its
+    /// filled sibling survives by area. `lostTrack` keeps the extra step it always
+    /// had — it is the one mark competing with a hatch behind it.
+    public static func markWeight(for state: AgentState) -> Font.Weight {
+        if motif(for: state) == .lostTrack { return .bold }
+        return markIsFilled(for: state) ? .regular : .semibold
     }
 
     /// Identity only. Full session detail is a popover's job, not this view's.
@@ -545,6 +593,22 @@ public struct AgentKeyView: View {
     /// Diagonal hatch, `unknown` only. The plan called for it by name, and it
     /// is the cue that survives a glance at the far edge of the screen: a
     /// hatched key is occupied-but-unreadable, an empty one is never hatched.
+    ///
+    /// Fine and light, and that is now a measured choice rather than the original
+    /// one left alone. A coarse hatch was tried — 3pt bands at a 14pt pitch, opacity
+    /// 0.42 — on the reasonable theory that a 1pt line every 7.8pt cannot survive
+    /// defocus, which is true: under `PixelCheck.glanceSeparation` the fine hatch is
+    /// a roughly uniform 13% brightening rather than a texture. It lost on both
+    /// counts anyway. Bright bands lift `unknown`'s *median* cap luminance, and the
+    /// median is exactly what whole-visible-cap separation is computed from, so
+    /// `error`/`unknown` in dark went **1.17 → 1.00** and `complete`/`unknown` **1.63
+    /// → 1.38**; and glance separation did not even pay for it, with
+    /// `complete`/`unknown` in dark going **1.93 → 1.73**. Trading the number task
+    /// 050 is about for the number task 050 is about is not a trade.
+    ///
+    /// So the hatch stays what it was: a texture cue for a direct look, and a plain
+    /// statement that the slot is occupied-but-unreadable. The glance channel is the
+    /// mark — see `iconName(for:)`.
     private func hatch(_ swatch: StateColors.StateSwatch) -> some View {
         let step = side * 0.17
         return Path { path in
@@ -578,7 +642,7 @@ public struct AgentKeyView: View {
             Image(systemName: Self.iconName(for: state))
                 .font(.system(
                     size: layout.fontSize(17),
-                    weight: p.motif == .lostTrack ? .bold : .regular
+                    weight: Self.markWeight(for: state)
                 ))
                 // One opacity for every state, including `emptySlot`. It used to
                 // fade the empty slot's mark to 0.6 so the slot would recede, and
@@ -675,6 +739,38 @@ public struct AgentKeyView: View {
                 )
             }
         }
+        // 1c. The mark's *coverage*, which is the part of the second channel that
+        //     survives a glance. Seven distinct silhouettes at one ink coverage
+        //     defocus into one blob — measured, on rendered pixels: the worst lit
+        //     pair scored 1.33 on `PixelCheck.glanceSeparation` when every lit mark
+        //     was filled, and 1.93 once filled and hollow were both in use. So
+        //     "the glyphs differ" is not the invariant; "the readings differ" is.
+        //
+        //     Asserted here as well as in the pixel check because this is the cheap
+        //     pure guard that says what the intent was. `PixelCheck` proves it on
+        //     the bitmap and is the one that can fail for a subtle reason; this one
+        //     fails immediately if someone adds a state and reaches for `.fill`
+        //     without thinking, which is the likely way it gets lost.
+        let litMarks = StateColors.litStates.map(markIsFilled(for:))
+        if !litMarks.contains(true) || !litMarks.contains(false) {
+            failures.append(
+                "every lit mark is \(litMarks.first == true ? "filled" : "hollow") — "
+                + "filled-versus-hollow is the achromatic channel and it is unused"
+            )
+        }
+        // The rule that assigns it, so it stays predictable rather than becoming a
+        // per-state opinion: filled means the panel wants something or is working.
+        for state in AgentState.allCases {
+            let shouldFill = state == .running || state.isAttentionWorthy
+            if markIsFilled(for: state) != shouldFill {
+                failures.append(
+                    "\(state.rawValue) mark is \(markIsFilled(for: state) ? "filled" : "hollow"), "
+                    + "but filled means active or attention-worthy and this state is "
+                    + "\(shouldFill ? "one of those" : "neither")"
+                )
+            }
+        }
+
         // A name that does not resolve draws nothing at all, which is the same
         // failure as having no second channel. Resolved, not trusted.
         for state in AgentState.allCases {

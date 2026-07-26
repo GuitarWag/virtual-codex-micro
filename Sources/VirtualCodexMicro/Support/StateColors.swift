@@ -161,9 +161,36 @@ public enum StateColors {
         /// The panel surface this swatch was resolved against.
         public let backdrop: RGB
 
-        /// What the eye sees where the label sits. Contrast is measured here.
+        /// The cap face: fill blended onto the backdrop at its own opacity. This is
+        /// the **ladder's** basis — one value per state, no lighting — and every
+        /// separation number in this file is computed from it.
         public var composedKeyFill: RGB {
             keyFill.composited(over: backdrop, alpha: fillOpacity)
+        }
+
+        /// The **middle** of the cap: `composedKeyFill` with the state glow over
+        /// it. This is where the glyph sits, so this is what label contrast is
+        /// measured against.
+        ///
+        /// It used to be measured against `composedKeyFill`, and that was wrong in
+        /// a way that mattered rather than a rounding difference. `AgentKeyView`
+        /// draws a radial glow at `glowOpacity` peaking dead centre, so the pixels
+        /// under the glyph are never the fill — they are the fill with 60–85% of a
+        /// *lighter* colour over them. The M1 review caught the consequence from the
+        /// other side: the model reported four glyphs comfortable that `PixelCheck`
+        /// measured short. Same defect, both directions — for a light glyph the
+        /// model is optimistic, for a dark one it is pessimistic, and `error` in
+        /// light is wedged between the two. Measured on the rendered cap the centre
+        /// is 0.252 relative luminance; `composedKeyFill` says 0.155 and this says
+        /// 0.181, so this is not exact either — the frost ramp and the moulding
+        /// account for the rest, and `PixelCheck` is what covers them. It is
+        /// **directionally right**, which `composedKeyFill` was not.
+        ///
+        /// Separation deliberately stays on `composedKeyFill`: the ladder is a
+        /// property of the palette, and folding the glow into it would make every
+        /// documented rung in this file mean something else.
+        public var composedKeyCentre: RGB {
+            stateGlow.composited(over: composedKeyFill, alpha: glowOpacity)
         }
     }
 
@@ -264,11 +291,26 @@ public enum StateColors {
         // rung with `complete`: red and green at one luminance is the textbook
         // deuteranopia failure, and "done" versus "failed" is the most expensive
         // confusion this panel can cause.
+        //
+        // **The light label is dark ink, and it is the one place in this file where
+        // that was forced by measurement rather than chosen.** It was white, and a
+        // white mark on a lit red cap is the one glyph on the panel that never
+        // reached 4.5:1 — 3.48 rendered, and unfixable from inside the fill:
+        // darkening the glow to lift it took `running` vs `error` down in lockstep
+        // (3.48→4.23 against 1.59→1.29), and no dark ink could pass while the model
+        // measured against `composedKeyFill`, whose ceiling with pure black is 4.10.
+        // Both halves of that trap are now gone — `composedKeyCentre` measures the
+        // ground the mark is actually on, and against it black clears the floor at
+        // 4.62 modelled and 6.0 rendered while the fill, the glow and every rung on
+        // the ladder stay exactly where they were. Pure black rather than the
+        // near-black used in the dark appearance because the margin is 0.12: this
+        // rung has no room for a decorative tint. It also matches what the reference
+        // photographs show, which is a dark mark on lit plastic, never a white one.
         case .error:
             StatePalette(
-                lightFill: RGB(0xCF192E), lightLabel: RGB(0xFFFFFF),
+                lightFill: RGB(0xCF192E), lightLabel: RGB(0x000000),
                 darkFill: RGB(0xDE5766), darkLabel: RGB(0x140406),
-                lightContrastFill: RGB(0xDE0015), lightContrastLabel: RGB(0xFFFFFF),
+                lightContrastFill: RGB(0xDE0015), lightContrastLabel: RGB(0x000000),
                 darkContrastFill: RGB(0xFE2F42), darkContrastLabel: RGB(0x000000),
                 lightGlow: RGB(0xE6273B), darkGlow: RGB(0xFF3145),
                 restingFillOpacity: 0.92, restingGlowOpacity: 0.85, restingGlowRadius: 13
@@ -458,14 +500,51 @@ public enum StateColors {
     /// and that room is the headroom the rasteriser spends.
     ///
     /// Scope, stated plainly: this is a floor on the **state-bearing centre** of the
-    /// cap. Measured across the *whole visible cap* the same pairs fall to 1.17–1.77,
-    /// because `plasticShell` takes every cap's rim to near-white and that is shared
-    /// between all of them. That is a real defect in the frosted restyle and it is on
-    /// the board; `PixelCheck` prints the number next to this one on every run so it
-    /// cannot be forgotten. It is not enforced there because the visible cap is
-    /// saturated and a floor on it cannot detect the regression this whole check
-    /// exists for — see `PixelCheck.capOuter` for the sabotage evidence.
+    /// cap, and it is a floor on *luminance*. Measured across the whole visible cap
+    /// the same pairs fall to 1.20–1.77, because `plasticShell` takes every cap's rim
+    /// to near-white and that is shared between all of them. `PixelCheck` prints
+    /// that number next to this one on every run so it cannot be forgotten. It is
+    /// not enforced there because the visible cap is saturated and a floor on it
+    /// cannot detect the regression this whole check exists for — see
+    /// `PixelCheck.capOuter` for the sabotage evidence.
+    ///
+    /// The visible cap is instead guarded by `minimumGlanceSeparation`, which does
+    /// not ask the fill for luminance it does not have. Read that next; the two
+    /// together are the whole guarantee, and neither is sufficient alone.
     public static let minimumStateSeparation = 1.50
+
+    /// Floor for telling two states apart across the **whole cap** at a glance,
+    /// measured by `PixelCheck.glanceSeparation`: the strongest contrast anywhere on
+    /// two caps once both are defocused to the acuity a glance actually has, in
+    /// greyscale, with hue discarded.
+    ///
+    /// This is a second floor because the first one cannot be widened. Five 1.8:1
+    /// luminance steps need 18.9:1 of range; the reference device's lit-cap band
+    /// offers 1.17:1, so the fill is saturated and every rung it gains comes off a
+    /// neighbour — measured, not argued, and it is why `minimumStateSeparation` says
+    /// 1.50 rather than the 1.8 it was constructed for. Asking one channel for hue
+    /// *and* the achromatic ladder was the mistake. The fill keeps hue; the **mark**
+    /// carries the achromatic channel, and this is the floor that makes that
+    /// load-bearing rather than decorative. Neither floor is sufficient alone: the
+    /// centre one is blind to everything drawn as a mark, this one is blind to a
+    /// palette that quietly flattens as long as some feature still differs.
+    ///
+    /// 1.80, and the numbers behind it. Before the mark was made to carry anything —
+    /// same palette, same caps, same frost, every lit mark a filled circle — the
+    /// worst lit pair scored **1.33** here and four pairs sat under 1.66, because
+    /// seven distinct SF Symbols at one ink coverage are not a channel. After: the
+    /// worst pair is **1.93** and all twenty clear it. Nothing about the fill moved
+    /// to get there.
+    ///
+    /// Margin is 0.13, roughly twice what `minimumStateSeparation` carries, and it
+    /// needs to be: this number depends on font rasterisation as well as on
+    /// compositing.
+    ///
+    /// It is deliberately a *max over the cap* rather than a mean. A mean is the
+    /// 1.20 whole-visible-cap figure above — it buries a 9pt patch of plainly
+    /// different plastic under the frosted rim all six caps share, and a 9pt patch on
+    /// a 46pt cap is exactly what peripheral vision can still resolve.
+    public static let minimumGlanceSeparation = 1.80
 
     /// The states that render as a lit key, and so have to be mutually
     /// distinguishable by luminance alone. Derived from `allCases` by exclusion
@@ -492,10 +571,12 @@ public enum StateColors {
         func fmt(_ v: Double) -> String { String(format: "%.2f", v) }
 
         for appearance in Appearance.allCases {
-            // Label must be legible on the fill it actually sits on.
+            // Label must be legible on the part of the cap it actually sits on,
+            // which is the glow-lit middle, not the bare fill. See
+            // `composedKeyCentre`.
             for state in AgentState.allCases {
                 let s = swatch(for: state, in: appearance)
-                let ratio = contrastRatio(s.keyLabel, s.composedKeyFill)
+                let ratio = contrastRatio(s.keyLabel, s.composedKeyCentre)
                 if ratio < minimumLabelContrast {
                     failures.append(
                         "\(state.rawValue) label contrast \(fmt(ratio)):1 in \(appearance.rawValue), needs \(fmt(minimumLabelContrast)):1"
@@ -569,7 +650,7 @@ public enum StateColors {
         for state in AgentState.allCases {
             let cells = Appearance.allCases.map { appearance -> String in
                 let s = swatch(for: state, in: appearance)
-                let ratio = contrastRatio(s.keyLabel, s.composedKeyFill)
+                let ratio = contrastRatio(s.keyLabel, s.composedKeyCentre)
                 return String(format: "%@=%.2f", appearance.rawValue, ratio)
             }
             lines.append(state.rawValue.padding(toLength: 12, withPad: " ", startingAt: 0)
