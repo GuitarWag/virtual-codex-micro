@@ -4,6 +4,30 @@
 
 ## TODO
 
+- [ ] [T-VCMPLAN1-037] **Colour checks measure the model, not rendered pixels** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-30`
+  > Found while frosting the caps: the colour suite reads StateColors.composedKeyFill and never looks at a rendered pixel, so it is structurally incapable of detecting a regression introduced by any layer drawn ON TOP of the fill. A throwaway probe compositing the real layer stack caught two the suite missed - a full-face frost dropped error's glyph contrast to 3.12:1 and compressed three lit pairs below the 1.8 floor. Port that probe into the checked path so the assertion measures what the user sees.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-038] **Rendered complete/error separation is 1.78 against a declared 1.8 floor** `priority:medium` `assignee:claude` `tags:m1,a11y` `due:2026-08-30`
+  > The palette model measures 1.82 but the composited render measures 1.78, because the glow layer sits over the fill. Predates the frosting work and is invisible to the current check (see task 037). Either bring the render up to the floor or lower the declared floor to what is actually achieved - a declared invariant the render quietly violates is worse than an honest lower number.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-039] **needsInput is wired but never witnessed** `priority:critical` `assignee:claude` `tags:m2,backend,state` `due:2026-09-06`
+  > PermissionRequest is installed and the mapping is in place, but it has never fired: it only occurs on an interactive session hitting a real approval prompt, and -p mode has no permission lifecycle at all. The amber key - the state the entire fast-glance thesis rests on - is therefore unproven end to end. Same for PermissionDenied, which never fired across 12 spike sessions, so the reject path's unconfirmed-resolves-to-unknown behaviour is also unwitnessed. Verify both against a real interactive session.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-040] **The app cannot be found if the hotkey does not fire** `priority:high` `assignee:claude` `tags:m1,panel,ship` `due:2026-08-30`
+  > LSUIElement means no Dock icon and no menu bar item, so the only route to the panel is Ctrl-Opt-Cmd-V - which is the one link never verified, because a real keypress needs a human. Observed live: the saved frame put the panel on a second display and it was simply unfindable. Two fixes, both cheap: add a menu bar item as a guaranteed route, and centre the default frame instead of the bottom-right corner at y=24, which sits behind the Dock on first launch.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-041] **Onboarding, keymap editor and activity log are unreachable** `priority:high` `assignee:claude` `tags:m2,config,ship` `due:2026-09-27`
+  > All three views are built and checked but referenced from zero places outside their own files. Consequence: hook installation has no consent path in the UI at all - it currently requires VCM_HOOKAPPLY from a terminal, which is not a product. Add a reachable route (a menu bar item per task 040, or a context menu on the plate) and present onboarding on first launch when hooks are absent.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [ ] [T-VCMPLAN1-042] **Redo the M1 exit review against the current layout** `priority:medium` `assignee:claude` `tags:m1,ui` `due:2026-08-30`
+  > docs/M1-REVIEW.md reviewed a 412x276 four-zone panel that no longer exists. Three of its structural criticisms dissolved when the layout was rebuilt from the reference photos as a square 4x4 grid, but its verdict and its GO conditions now describe superseded geometry. Re-review the real thing, including the frosted caps and the case underglow, and check the invented plate legends read as ours rather than as a copy.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
 ## IN PROGRESS
 
 ## DONE
