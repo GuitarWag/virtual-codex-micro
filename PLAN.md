@@ -46,6 +46,64 @@ keys must be **capability-gated per bound session** rather than always-live, and
 explicit `unknown` state instead of guessing. Drift between the panel and reality is the failure mode
 the PRD itself names as risk #1 — the fix is to never render a confidence we don't have.
 
+## M0 spike verdicts (2026-07-26)
+
+Two of the four gates have reported. Both confirm the owned-vs-observed correction and both sharpen it
+in ways the original plan got wrong.
+
+**PTY control — RELIABLE WITH CAVEATS** (`spikes/pty/FINDINGS.md`). Injection into a pseudo-terminal is
+deterministic: 30/30 landed, worst case 20ms, including bytes written before the child finished `exec`
+and into a full-screen TUI mid-render. So the mechanism is not the problem. Two things are:
+
+- Reading state back out of a TUI byte stream does not work. A prompt written across a redraw boundary
+  is invisible to substring matching — the stub's question `Apply this patch to disk?` occupies one
+  visual row but is written in three fragments out of order, and stripping escapes concatenates them in
+  write order, not screen order. Worse, a match is not an event: one unanswered prompt produced 60 hits
+  and stayed in the stream after the prompt was gone, so `contains(needle)` is sticky and would report
+  "needs input" forever.
+- Blind injection can be silently discarded. A child entering raw mode with `TCSAFLUSH` throws away
+  anything queued before that call. Reproduced. So an accept keystroke is only safe once we *know* the
+  prompt is up — which needs the detection we just established we do not have from the stream.
+
+The escape is that we do not have to read the TUI at all. `claude --input-format stream-json
+--output-format stream-json` is line-delimited JSON on the stdin/stdout we already own, carries
+`session_id`, emits hook events inline, and `--replay-user-messages` gives the delivery confirmation
+raw injection lacks. Measured under a PTY: 99% printable, one escape sequence in 20 KB, no
+alternate-screen use.
+
+Three findings that are correctness requirements, not preferences:
+
+1. **`forkpty`, not `openpty` + Foundation `Process`.** `Process` offers no hook between fork and exec,
+   so the pty never becomes the controlling terminal: job control, `SIGWINCH`, `^C` and hangup-on-close
+   all stop working, and every child becomes a guaranteed orphan.
+2. **A reader must drain the master continuously** for the life of every child, or the child blocks in
+   `write()` and the session merely looks hung.
+3. **Teardown must `killpg` then `SIGKILL` on a timeout.** The pty hangup is not cleanup — a child
+   survived it once in 66 runs, and `SIGHUP`-ignoring grandchildren (language servers, MCP servers, node
+   workers — exactly what an agent CLI spawns) survive every time while keeping the child's PGID.
+
+**Transcript tailing — ship it, but only because it abstains** (`spikes/tailing/FINDINGS.md`). 93%
+agreement with look-ahead truth over 13,677 observations, 0.9% wrong, 6.1% abstained to `unknown`, and
+sub-250ms detection at a 200ms poll. Good enough to make six keys useful the moment the panel opens.
+
+But the headline is a hard limit: **a pending permission prompt produces no transcript record at all.**
+Nothing is written between a `tool_use` and its `tool_result`, so a `Bash` call that ran for 100 minutes
+and an approval prompt that sat open for 145 minutes before being rejected have byte-identical tails.
+The denial is recorded only after the user answers. The single exception is `AskUserQuestion`, whose tool
+name is in the `tool_use` block and which exists only to wait for a human.
+
+So `needsInput` — the state the PRD's entire fast-glance thesis rests on — is not inferrable from disk.
+**Hooks are not a latency optimisation over tailing; they are the only source for the amber key.** If a
+user declines the hook installer, the panel must say `needsInput` is unavailable rather than quietly
+never lighting up.
+
+Three implementation constraints fell out of it: subagent transcripts must be excluded (they never
+contain a turn-boundary record, so every one looks permanently mid-turn and would add phantom running
+siblings); the session-to-process join must use the candidate id set rather than the filename (a resumed
+session's records carry a different `session_id` than its filename, so filename matching reports live
+sessions as dead); and a `ps` liveness join must ship alongside, because without it "idle" and "crashed"
+are the same colour.
+
 ## Where state actually comes from
 
 For Claude Code there are two viable sources, and they should both exist:
