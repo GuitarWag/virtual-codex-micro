@@ -52,6 +52,9 @@ enum SelfCheck {
         failures += FocusOrder.selfCheckFailures().map { "focusorder: \($0)" }
         failures += StateEngine.selfCheckFailures().map { "engine: \($0)" }
         failures += FocusResolver.selfCheckFailures().map { "focus: \($0)" }
+        failures += ClaudeTranscriptSource.selfCheckFailures().map { "tail: \($0)" }
+        failures += SessionRegistry.selfCheckFailures().map { "registry: \($0)" }
+        failures += SessionPopover.selfCheckFailures().map { "popover: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")

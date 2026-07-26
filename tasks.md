@@ -20,10 +20,6 @@
   > Connect accept, reject and new session to adapter dispatch, and bind the dial to effort where the session supports it. Each key's enabled state derives from the bound session's declared capabilities, so an observed session shows accept and reject disabled with a hover explanation. No optimistic UI: a key reflects the outcome the adapter reports, not the click.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [ ] [T-VCMPLAN1-026] **Session detail popover and rebinding** `priority:medium` `assignee:claude` `tags:m2,ui` `due:2026-09-20`
-  > Hover and secondary click surface session name, backend, repo, branch, capability summary and last state transition with timestamp. Actions: rebind to another session, clear the slot, open the activity log filtered to this session. Keeps the panel itself minimal while the detail lives one gesture away.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-027] **Activity strip and local event log** `priority:medium` `assignee:claude` `tags:m2,state` `due:2026-09-22`
   > Subtle strip showing the most recent state changes and dispatched actions, backed by a bounded in-memory ring buffer with an inspectable full view. Exists for trust and debugging: when the panel and reality disagree, this is what tells the user which event we did or did not receive. Stays local, no network.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-020] **Session registry with persistent key bindings** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-02`
   > Persist which session occupies which of the six slots so a key keeps meaning the same thread across app restarts and machine sleep. Handle the reconnect cases explicitly: session still alive, session gone, session replaced by a new one in the same repo. A stale binding must resolve to `unknown` and offer rebind, never silently re-point at a different thread.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-026] **Session detail popover and rebinding** `priority:medium` `assignee:claude` `tags:m2,ui` `due:2026-09-20`
+  > Hover and secondary click surface session name, backend, repo, branch, capability summary and last state transition with timestamp. Actions: rebind to another session, clear the slot, open the activity log filtered to this session. Keeps the panel itself minimal while the detail lives one gesture away.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED
