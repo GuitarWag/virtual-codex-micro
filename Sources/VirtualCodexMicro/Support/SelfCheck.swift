@@ -34,6 +34,10 @@ enum SelfCheck {
         // Every state needs a non-empty label, or status becomes colour-only.
         check("all states labelled", AgentState.allCases.allSatisfy { !$0.label.isEmpty })
 
+        // Module-owned invariants. Each module exposes selfCheckFailures() in its
+        // own file so parallel work never contends on this one.
+        failures += PanelLayout.selfCheckFailures().map { "layout: \($0)" }
+
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")
             exit(0)

@@ -206,18 +206,18 @@ switch mode {
 // 1. Cheapest possible proof the mechanism works at all.
 case "sh-basic":
     let c = spawnPTY(["/bin/sh"])
-    _ = writeAll(c.master, "echo hello\n")           // written before the child can have exec'd
+    // Both lines written before the child can even have exec'd. printf with a format arg so
+    // "hello" can only appear in sh's OUTPUT, not in the pty's echo of our input.
+    _ = writeAll(c.master, "printf '%s\\n' hello\nexit\n")
     var sink = [UInt8]()
-    let end = pump(c.master, deadline: Date().addingTimeInterval(3), sink: &sink) {
-        String(decoding: $0, as: UTF8.self).contains("hello")
-    }
-    _ = writeAll(c.master, "exit\n")
+    let end = pump(c.master, deadline: Date().addingTimeInterval(3), sink: &sink)
     let w = reap(c.pid, timeout: 2)
+    close(c.master)
     let text = String(decoding: sink, as: UTF8.self)
-    print("read end: \(end)")
+    print("read end: \(end) \(errnoName(end))")
     print("raw: \(text.debugDescription)")
     print("waitpid: \(w?.describe ?? "TIMED OUT")")
-    print("\(ok(text.contains("hello"))) sh-basic: echo round-trip")
+    print("\(ok(text.contains("hello\r\n"))) sh-basic: command injected at t=0 executed, output read back")
 
 // 2. Does input written before the child has drawn anything survive? Repeat to catch flakiness.
 case "race":
@@ -227,8 +227,10 @@ case "race":
     for i in 0..<rounds {
         let c = spawnPTY(["/bin/sh"])
         let t0 = Date()
-        // zero delay: the child has not exec'd yet, let alone printed a prompt
-        _ = writeAll(c.master, "echo R\(i)-ok\n")
+        // zero delay: the child has not exec'd yet, let alone printed a prompt.
+        // printf with a format arg, so the needle "R<i>-ok" can only come from sh's OUTPUT,
+        // never from the pty's echo of our own input.
+        _ = writeAll(c.master, "printf 'R\(i)-%s\\n' ok\n")
         var sink = [UInt8]()
         let end = pump(c.master, deadline: Date().addingTimeInterval(5), sink: &sink) {
             String(decoding: $0, as: UTF8.self).contains("R\(i)-ok\r\n")
@@ -256,8 +258,10 @@ case "vi":
         String(decoding: $0, as: UTF8.self).contains("injected-mid-render")
     }
     _ = writeAll(c.master, ":wq\r")
-    let w = reap(c.pid, timeout: 5)
-    _ = pump(c.master, deadline: Date().addingTimeInterval(1), sink: &sink)
+    // Drain to EOF FIRST. Calling waitpid() while not reading the master deadlocks: the pty
+    // buffer fills, the child blocks in write(), and it can never reach exit(). See FINDINGS.md.
+    _ = pump(c.master, deadline: Date().addingTimeInterval(5), sink: &sink)
+    let w = reap(c.pid, timeout: 3)
     close(c.master)
     let onDisk = (try? String(contentsOfFile: path, encoding: .utf8)) ?? "<no file>"
     let (plain, noise) = analyze(sink)
@@ -293,18 +297,25 @@ case "noise":
     print(String(plain.prefix(400)))
 
 // 5. The real question: can a pending-approval prompt be detected from the stream, and answered?
+// prompt <stubPath> [--raw-when=drain|flush|now] [--early]
+//   --early: inject the answer at t=0, before the child has drawn anything, to test whether
+//            input queued during a render survives the child's tcsetattr().
 case "prompt":
     let stub = rest.first ?? "spikes/pty/approval_stub.py"
-    let c = spawnPTY(["/usr/bin/env", "python3", stub])
+    let early = rest.contains("--early")
+    let stubArgs = rest.dropFirst().filter { $0.hasPrefix("--raw-when=") }
+    let c = spawnPTY(["/usr/bin/env", "python3", stub] + stubArgs)
     var sink = [UInt8]()
     let needle = "Do you want to proceed?"
     var detectedAt: Date?
     let t0 = Date()
+    if early { _ = writeAll(c.master, "1\r") }
     let end = pump(c.master, deadline: Date().addingTimeInterval(6), sink: &sink) { b in
         if String(decoding: b, as: UTF8.self).contains(needle) { detectedAt = Date(); return true }
         return false
     }
     let rawDetect = detectedAt != nil
+    print("mode: \(early ? "EARLY injection (answer written at t=0)" : "reactive (answer written after detection)"), stubArgs=\(stubArgs.joined(separator: " "))")
     // Also try detection on the naively-stripped text, and on a per-frame basis.
     let (plainSoFar, _) = analyze(sink)
     print("raw-stream substring match for \(needle.debugDescription): \(rawDetect) (\(end))")
@@ -314,8 +325,8 @@ case "prompt":
     let split = "Apply this patch"
     print("split-across-escapes needle \(split.debugDescription): raw=\(String(decoding: sink, as: UTF8.self).contains(split)) stripped=\(plainSoFar.contains(split))")
     // Answer it: option "1" then Enter, the same shape as a Claude Code approval.
-    _ = writeAll(c.master, "1\r")
-    _ = pump(c.master, deadline: Date().addingTimeInterval(4), sink: &sink) {
+    if !early { _ = writeAll(c.master, "1\r") }
+    _ = pump(c.master, deadline: Date().addingTimeInterval(8), sink: &sink) {
         String(decoding: $0, as: UTF8.self).contains("ANSWER=")
     }
     let w = reap(c.pid, timeout: 3)
@@ -357,7 +368,7 @@ case "orphan":
 
 // 8. Same, but we close the master fd (pty hangup) and see if that is enough.
 case "hangup":
-    let cmd = rest.isEmpty ? ["/bin/sh", "-c", "sleep 300"] : cmd_or(rest)
+    let cmd = rest.isEmpty ? ["/bin/sh", "-c", "sleep 300"] : rest
     let c = spawnPTY(cmd)
     usleep(300_000)
     print("child_pid=\(c.pid); closing master fd now")
@@ -387,8 +398,6 @@ default:
     print("unknown mode \(mode)")
     exit(2)
 }
-
-func cmd_or(_ r: [String]) -> [String] { r }
 
 func errnoName(_ e: ReadEnd) -> String {
     guard case .eof(let v) = e else { return "-" }
