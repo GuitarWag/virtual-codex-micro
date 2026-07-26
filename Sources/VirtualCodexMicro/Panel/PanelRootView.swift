@@ -29,7 +29,6 @@ struct PanelRootView: View {
             commandCluster
             dial
             pad
-            overflowChip
             actionNote
         }
         .frame(width: layout.panelSize.width, height: layout.panelSize.height)
@@ -64,7 +63,8 @@ struct PanelRootView: View {
             // with nothing bound to a direction.
             return true
         case .overflow:
-            return !coordinator.unbound.isEmpty
+            // Not rendered any more, so never a stop.
+            return false
         }
     }
 
@@ -149,19 +149,11 @@ struct PanelRootView: View {
         .focused($focus, equals: .joystick)
     }
 
-    private var overflowChip: some View {
-        OverflowView(
-            unbound: coordinator.unbound,
-            layout: layout,
-            slotOccupants: (0 ..< PanelLayout.agentKeyCount).map { coordinator.session(at: $0)?.id },
-            onBind: { _, _ in }
-        )
-        .offset(
-            x: OverflowView.indicatorFrame(layout).minX,
-            y: OverflowView.indicatorFrame(layout).minY
-        )
-        .focused($focus, equals: .overflow)
-    }
+    // The overflow chip is deliberately not shown. Its bind action was a no-op
+    // closure — a button that did nothing — and now that only live sessions take a
+    // key there is normally no overflow to report. If more than six live sessions
+    // ever exist, the extras are currently invisible; the activity log is where that
+    // would surface. OverflowView.swift is consequently unreferenced.
 
     /// Brief feedback for the last command, on the plate's bottom legend line so it
     /// displaces printed text rather than covering a key. Four seconds, then gone.

@@ -351,8 +351,15 @@ final class PanelCoordinator: ObservableObject {
     private func autobindFreeSlots() {
         let free = (0 ..< PanelLayout.agentKeyCount).filter { registry.binding(at: $0) == nil }
         guard !free.isEmpty else { return }
+        // ONLY live sessions get a key. A dead transcript has no pid, cannot be
+        // focused, cannot be acted on, and can only ever read `unknown` — so binding
+        // one spends a slot to display nothing. An empty key is honest; a key that is
+        // permanently grey is noise competing with the five that mean something.
+        //
+        // cmux-hosted sessions count as live even without a pid, because cmux gives
+        // authoritative identity from the surface itself rather than from argv.
         let ordered = registry.unbound(from: discoveredSessions)
-        var candidates = ordered.filter { $0.pid != nil } + ordered.filter { $0.pid == nil }
+        var candidates = ordered.filter { $0.pid != nil || cmuxHosted.contains($0.session.id) }
         for slot in free {
             guard let next = candidates.first else { break }
             candidates.removeFirst()
