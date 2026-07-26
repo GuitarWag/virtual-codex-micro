@@ -4,10 +4,6 @@
 
 ## TODO
 
-- [ ] [T-VCMPLAN1-005] **M0: record architecture and distribution decisions** `priority:critical` `assignee:claude` `tags:m0,spike` `due:2026-08-02`
-  > Close the PRD open questions with written decisions: Claude Code as first-class v1 backend; owned-vs-observed session split with capability gating; direct notarized distribution rather than App Store (sandbox cannot host PTY spawning plus ~/.claude reads plus Automation); replica fidelity as zone-and-order faithful with pointer-optimised proportions. Add the seventh `unknown` visual state to the state model, distinct from `unassigned`. Blocks M1 — the layout and the key component both depend on the final state list.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [ ] [T-VCMPLAN1-016] **Accessibility pass** `priority:high` `assignee:claude` `tags:m1,a11y` `due:2026-08-21`
   > Every key reachable and actuatable by keyboard with a predictable order across the four zones. VoiceOver labels that state role, binding and current status. Every colour state paired with text, icon or pulse so status never depends on hue alone. Reduce Motion disables pulse and glow animation; Reduce Transparency swaps frosted materials for solid fills with defined edges. Labels must stay legible at the compact panel size. Non-negotiable scope — this is the accessibility floor, not polish.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -18,10 +14,6 @@
 
 - [ ] [T-VCMPLAN1-018] **Normalized state engine** `priority:critical` `assignee:claude` `tags:m2,state` `due:2026-08-28`
   > Owns the seven-state model and the legal transitions between them, independent of any provider vocabulary. Includes a staleness timer: a source that goes quiet past its threshold drives the key to `unknown` rather than leaving the last known colour on screen. Provider-specific statuses are mapped in at the adapter boundary, so the views never see a raw backend string.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
-- [ ] [T-VCMPLAN1-019] **AgentBackend protocol and capability model** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-08-29`
-  > One protocol every adapter implements: enumerate sessions, bind a session, publish a normalized status stream, dispatch a command, and declare capabilities. Capabilities are per session rather than per backend, because an owned session and an observed session from the same provider differ in exactly what they will accept. The UI consumes only this protocol — no provider branching above the adapter line.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-020] **Session registry with persistent key bindings** `priority:high` `assignee:claude` `tags:m2,state` `due:2026-09-02`
@@ -37,7 +29,7 @@
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-023] **Claude Code adapter: owned sessions under PTY** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-09-13`
-  > Spawn and supervise sessions the app owns. The M0 spike settled the mechanism, so these are now requirements rather than choices: use forkpty, NOT openpty plus Foundation Process (Process gives no hook between fork and exec, so the pty never becomes the controlling terminal and every child is a guaranteed orphan); keep a reader draining the pty master for the life of every child or it blocks in write() and looks hung; tear down with killpg then SIGKILL on a timeout, because the pty hangup leaked once in 66 runs and never reaches SIGHUP-ignoring grandchildren like MCP servers or language servers. Drive state and commands over --input-format stream-json --output-format stream-json rather than scraping the TUI, and use --replay-user-messages for delivery confirmation before an accept key returns to idle. Untested and still open: six concurrent children, sleep/wake, SIGWINCH resize, and a startup sweep for strays from a previous crash.
+  > Spawn and supervise sessions the app owns. The M0 spike settled the mechanism, so these are now requirements rather than choices: use forkpty, NOT openpty plus Foundation Process (Process gives no hook between fork and exec, so the pty never becomes the controlling terminal and every child is a guaranteed orphan); keep a reader draining the pty master for the life of every child or it blocks in write() and looks hung; tear down with killpg then SIGKILL on a timeout, because the pty hangup leaked once in 66 runs and never reaches SIGHUP-ignoring grandchildren like MCP servers or language servers. DECIDED: owned sessions run a VISIBLE TUI (not headless stream-json), because the PRD's non-goal is not replacing the terminal and the hook spike removed the reason injection was unsafe. Sequence: PermissionRequest hook fires at 1ms -> key amber -> user presses accept -> keystroke injected into the PTY -> PostToolUse confirms -> key returns to running. Detection comes from hooks, never from scraped text. HARD REQUIREMENT on the reject path: PermissionDenied never fired in 12 spike sessions, so there is no proven signal a rejection landed. After injecting, wait for a confirming event within a bounded window and drive the key to `unknown` if none arrives. An unconfirmed reject must NEVER be reported as done. Spawn with --settings pointing at our own hook file, which gives full hook coverage with zero writes to the user's ~/.claude/settings.json. Untested and still open: six concurrent children, sleep/wake, SIGWINCH resize, and a startup sweep for strays from a previous crash.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 - [ ] [T-VCMPLAN1-024] **Focus action for bound sessions** `priority:high` `assignee:claude` `tags:m2,backend` `due:2026-09-16`
@@ -138,6 +130,14 @@
 
 - [x] [T-VCMPLAN1-004] **M0: spike foregrounding a foreign terminal session** `priority:high` `assignee:claude` `tags:m0,spike,backend` `due:2026-08-01`
   > Given a session id, raise the exact window and tab that owns it. Test Terminal.app, iTerm2 and Ghostty via AppleScript/Automation, plus tmux select-window when the process sits inside a tmux pane. Record which permission prompt each path triggers and which emulators cannot be targeted at all. Focus is the one action that works on observed sessions, so its reliability sets the floor for the product's value. Deliverable: per-emulator support matrix.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-019] **AgentBackend protocol and capability model** `priority:critical` `assignee:claude` `tags:m2,backend` `due:2026-08-29`
+  > One protocol every adapter implements: enumerate sessions, bind a session, publish a normalized status stream, dispatch a command, and declare capabilities. Capabilities are per session rather than per backend, because an owned session and an observed session from the same provider differ in exactly what they will accept. The UI consumes only this protocol — no provider branching above the adapter line.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-005] **M0: record architecture and distribution decisions** `priority:critical` `assignee:claude` `tags:m0,spike` `due:2026-08-02`
+  > Close the PRD open questions with written decisions: Claude Code as first-class v1 backend; owned-vs-observed session split with capability gating; direct notarized distribution rather than App Store (sandbox cannot host PTY spawning plus ~/.claude reads plus Automation); replica fidelity as zone-and-order faithful with pointer-optimised proportions. Add the seventh `unknown` visual state to the state model, distinct from `unassigned`. Blocks M1 — the layout and the key component both depend on the final state list.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

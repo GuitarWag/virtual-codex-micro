@@ -170,6 +170,36 @@ Accessibility is denied on this machine and **cannot be granted non-interactivel
 back as plain error codes with no dialog, so from a CLI context the user is never even asked. Anything
 needing Accessibility requires explicit onboarding plus a runtime probe.
 
+## Decisions taken after the spikes (2026-07-26)
+
+**Owned sessions run a visible TUI, with keystroke injection gated on `PermissionRequest`.** Not
+headless. The PRD's own non-goal — do not replace the terminal in v1 — argues for keeping the session
+readable where the user already reads it, and the hook spike removed the blocker that made injection
+unsafe: we no longer have to detect the prompt by scraping, because `PermissionRequest` tells us at 1 ms.
+The sequence is prompt fires → key turns amber → user presses accept on the panel → keystroke injected
+into the PTY → `PostToolUse` confirms → key returns to running.
+
+The accepted risk is the reject path. `PermissionDenied` never fired across 12 spike sessions (gap G6),
+so there is no proven signal that a rejection landed. The honest handling, and a requirement on task 023:
+after injecting, wait for a confirming event within a bounded window; if none arrives, drive the key to
+`unknown` rather than assuming the action succeeded. An unconfirmed reject must never be reported as
+done. Verifying `PermissionDenied` stays open as follow-up work.
+
+**Click-to-focus ships as three labelled tiers, not one feature.** Tier 1 targets window and tab
+(Terminal.app, iTerm2, tmux). Tier 2 raises the app only (cmux, GoLand, VS Code, Zed) and the key says
+so — "raises cmux, cannot target the tab". Tier 3 is visibly inert with a reason, except detached tmux,
+which offers to attach. No engineering gamble on another app's scripting surface, and the limitation is
+stated in the UI rather than discovered by the user when the wrong tab comes forward.
+
+This does mean the primary machine's own configuration is Tier 2, so the M2 exit criterion is amended:
+focus must work correctly *and report its tier correctly*, rather than "work on the primary terminal".
+
+**Hook delivery uses `command` + `async: true`, not plain `http`.** My call, from gap G5: hooks block
+the transition synchronously, so a wedged listener would degrade the user's Claude Code. Slowing down
+somebody's agent is a worse failure than a stale colour on a key, and `async: true` exists only for
+command hooks. `SessionStart` had to be a command hook anyway (G1), and that is also where `CLAUDE_PID`
+comes from for liveness and focus.
+
 ## Where state actually comes from
 
 For Claude Code there are two viable sources, and they should both exist:

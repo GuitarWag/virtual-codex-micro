@@ -49,6 +49,7 @@ enum SelfCheck {
         failures += DialView.selfCheckFailures().map { "dial: \($0)" }
         failures += DirectionPadView.selfCheckFailures().map { "pad: \($0)" }
         failures += MockBackend.selfCheckFailures().map { "mock: \($0)" }
+        failures += StateEngine.selfCheckFailures().map { "engine: \($0)" }
 
         if failures.isEmpty {
             print("selfcheck: ok (\(AgentState.allCases.count) states)")
