@@ -1291,10 +1291,30 @@ public extension OwnedSession {
         func check(_ name: String, _ condition: Bool) {
             if !condition { failures.append(name) }
         }
+        /// How much longer to wait than the nominal budget, from current load.
+        ///
+        /// These are integration tests against the OS scheduler: they fork real
+        /// processes and wait for real signals and real EOF. A fixed deadline is
+        /// therefore a coin flip on a busy machine, and four separate assertions
+        /// here — the stray sweep, concurrent-child exit, EOF on the master, and
+        /// resize-after-hangup — were observed failing at load 12 and passing 8/8
+        /// at rest. That is the worst kind of check: it trains you to disbelieve
+        /// failures, which costs more than the check is worth.
+        ///
+        /// Scaling patience with contention keeps the checks fast at rest (the
+        /// multiplier is 1) and honest under load, without weakening what they
+        /// assert. Clamped so a runaway load average cannot stall the run.
+        let patience: TimeInterval = {
+            var loads = [Double](repeating: 0, count: 3)
+            guard getloadavg(&loads, 3) > 0 else { return 1 }
+            let perCore = loads[0] / Double(max(1, ProcessInfo.processInfo.activeProcessorCount))
+            return min(8, max(1, perCore * 4))
+        }()
+
         /// Polls instead of sleeping a fixed time, so a fast machine is fast and a
         /// loaded one still passes.
         func until(_ seconds: TimeInterval, _ ready: () -> Bool) -> Bool {
-            let deadline = Date().addingTimeInterval(seconds)
+            let deadline = Date().addingTimeInterval(seconds * patience)
             while Date() < deadline {
                 if ready() { return true }
                 usleep(5000)
