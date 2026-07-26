@@ -104,6 +104,72 @@ session's records carry a different `session_id` than its filename, so filename 
 sessions as dead); and a `ps` liveness join must ship alongside, because without it "idle" and "crashed"
 are the same colour.
 
+**Hooks — the right primary source, but the plan named the wrong events**
+(`spikes/hooks/FINDINGS.md`). `hook_event_name` is a closed enum of **30** values in 2.1.220, extracted
+from the binary's own schema. The five this plan listed were the wrong five, and the important one was
+missing entirely.
+
+`Notification` is **not** the needs-input signal. It is debounced by a fixed 6-second idle timer
+(measured 6004 / 6005 / 6002 ms across three sessions), which means it is suppressed exactly when the
+user is present and working — a key that lights only after you have stopped typing is the wrong shape
+for a fast-glance product. It is also interactive-only, and the channel is shared with ten unrelated
+notification types including login toasts. **`PermissionRequest` is the correct signal: 1 ms,
+unconditional, and it carries `tool_name`, `tool_input` and the exact `permission_suggestions` the
+dialog is offering** — which is also what the accept and reject keys need in order to act. Keep
+`Notification` only for `idle_prompt`, which is a genuine "waiting on a human for a minute" signal
+nothing else provides.
+
+The useful events land in **6–31 ms**, beating the 1-second M2 criterion by thirty times. `running`,
+`complete` and `needsInput` — the three states the product is built around — are all solidly witnessed.
+`error` is **unverified**: `StopFailure` and `PostToolUseFailure` were registered across 12 sessions and
+never fired because nothing failed.
+
+Five gaps that change the design:
+
+- **`SessionStart` is silently dropped for `http` hooks** — 0 events received with http, 1 with command,
+  matcher irrelevant. So `SessionStart` must be a `command` hook. That is fortunate, because a command
+  hook also receives `CLAUDE_PID`, which is the missing link for both liveness and window focus.
+- **Hooks are edge-triggered with no snapshot and no query.** A panel opening mid-session learns nothing
+  until the next transition. **This promotes transcript tailing from fallback to requirement** — it is
+  the only way to populate six keys at launch.
+- **No heartbeat, and `SIGKILL` produces no `SessionEnd`,** so `unknown` is unreachable from the hook
+  stream. Fix: record `CLAUDE_PID` at session start and poll `kill(pid, 0)`.
+- **Subagent events must be filtered.** A `SubagentStop` arrived 3.8 s *after* the main `Stop` carrying
+  the same `session_id`; the only distinguishing mark is the presence of `agent_id`.
+- **Hooks block the transition synchronously.** Every state change in every bound session waits on our
+  listener. A wedged listener degrades the user's Claude Code, which is a worse failure than a wrong
+  colour on a key. Use `command` + `async: true`, or treat listener latency as a hard budget.
+
+One genuinely good find: for sessions **we** spawn, `--settings <our own file>` supplies the same hook
+coverage with zero writes to the user's config. The consent problem disappears for the half of the
+product that can actually act. And where we must edit `~/.claude/settings.json` for observed sessions,
+merging was proven safe — the user's existing `PreToolUse` hook and ours both ran, additively.
+
+**Focus — three tiers, and the machine's own setup lands in the weakest one**
+(`spikes/focus/FINDINGS.md`). This is the least comfortable result of the four.
+
+Tier 1, full window-and-tab targeting, verified: Terminal.app (5/5), iTerm2 (10/10 after rewrite), tmux
+in either (4/4). Tier 2, app-only activation: cmux, GoLand, VS Code, Zed — these expose no tty-to-window
+mapping, so we can raise the app but not the tab. Tier 3, nothing: no controlling tty, or a detached
+tmux session.
+
+**On this machine, 0 of 4 live agent sessions are fully targetable** — three run in cmux, one in a
+GoLand terminal. The two emulators that work had to be populated by the spike itself. So "click a key to
+jump to that session" degrades to "brings cmux forward" in the user's actual configuration, and the M2
+exit criterion as originally written does not hold here.
+
+Three traps worth carrying forward. `TERM_PROGRAM` lies — inside cmux it reports `ghostty`, and Ghostty
+is not installed at all, so detection must walk the process tree rather than trust the variable. iTerm2's
+scripting surface is a minefield: six documented approaches fail silently and only one undocumented
+iteration order works, scoring 2/15 before the rewrite while *returning success*. And tty numbers are
+recycled within minutes, so a cached tty must be re-validated against the live pid or the app raises a
+stranger's window. The common thread is that two of three code paths were initially wrong in a way that
+produced no error, so the implementation must verify after acting rather than trust a return value.
+
+Accessibility is denied on this machine and **cannot be granted non-interactively** — both denials came
+back as plain error codes with no dialog, so from a CLI context the user is never even asked. Anything
+needing Accessibility requires explicit onboarding plus a runtime probe.
+
 ## Where state actually comes from
 
 For Claude Code there are two viable sources, and they should both exist:
