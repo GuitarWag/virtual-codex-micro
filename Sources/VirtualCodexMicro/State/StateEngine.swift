@@ -180,7 +180,10 @@ public enum IngestResult: Sendable, Equatable {
 ///
 /// 1. A state outside the reporting source's declared vocabulary — rejected and
 ///    logged. This is the rule that stops transcript inference from ever asserting
-///    `needsInput`, and stops any provider source from claiming `unassigned`.
+///    `needsInput`, and stops any provider source from claiming `unassigned`. A
+///    source outside the vocabulary can still *retract* somebody else's
+///    `needsInput` — see `clearNeedsInput`, which is why "I saw the prompt end" does
+///    not require the standing to say "a prompt is open".
 /// 2. A reading from an unregistered source — rejected and logged, because its
 ///    confidence and limits are unknown and guessing them is how a low-confidence
 ///    guess gets rendered as fact.
@@ -249,6 +252,46 @@ public struct StateEngine: Sendable {
         }
         forSession[sourceID] = StateReading(sourceID: sourceID, state: state, observedAt: observedAt)
         readings[sessionID] = forSession
+        return .accepted
+    }
+
+    /// Drop a `needsInput` reading whose *end* a source has witnessed, without that
+    /// source ever gaining the vocabulary to assert `needsInput` itself.
+    ///
+    /// This exists because rejecting a permission prompt emits no hook event at all —
+    /// witnessed in `spikes/needsinput`, both reject affordances: no `PermissionDenied`,
+    /// no `Stop`, no `PostToolUseFailure`, and no `Notification` after 170 s idle. So
+    /// `PermissionRequest` turns a key amber and the hook stream has nothing left to
+    /// say, while the only account of the rejection is in the transcript — and
+    /// `claude.transcript` must never gain `.needsInput` in `reportableStates`, because
+    /// a *pending* prompt writes nothing to disk and claiming otherwise is the exact
+    /// lie `reportableStates` exists to prevent.
+    ///
+    /// **Clearing is not reporting**, and the asymmetry is the whole point: this can
+    /// only ever take amber down. It never names a replacement state, so whatever the
+    /// contributing sources can legitimately report resolves normally — on the reject
+    /// path the same transcript tail carries the `turn_duration` that closes the turn,
+    /// so the key goes to a colour something actually witnessed. If nothing else has
+    /// spoken, it goes to `.unknown`, which is the honest answer and not a guess.
+    ///
+    /// `observedAt` is when the evidence says the prompt ended, and only readings
+    /// **older** than it are dropped. That comparison is load-bearing rather than
+    /// defensive: the rejection marker stays inside the tailer's window for the next
+    /// 80 records, so this is called again on every poll with the same old timestamp,
+    /// and without it the next real `PermissionRequest` would be wiped the instant it
+    /// arrived.
+    @discardableResult
+    public mutating func clearNeedsInput(
+        for sessionID: String,
+        from sourceID: String,
+        observedAt: Date
+    ) -> IngestResult {
+        guard sources[sourceID] != nil else {
+            return reject("unregistered source '\(sourceID)' cleared needsInput for \(sessionID)")
+        }
+        readings[sessionID] = readings[sessionID]?.filter { _, reading in
+            reading.state != .needsInput || reading.observedAt >= observedAt
+        }
         return .accepted
     }
 
@@ -401,6 +444,32 @@ public extension StateEngine {
             "an unregistered source is rejected",
             capped.record(.idle, for: "s", from: "nobody", observedAt: t0) != .accepted
         )
+        check(
+            "an unregistered source cannot clear needsInput either",
+            capped.clearNeedsInput(for: "s", from: "nobody", observedAt: t0) != .accepted
+        )
+        // Retracting somebody else's needsInput is allowed to a source that cannot
+        // report it — that is the whole point — and it must not become a back door for
+        // asserting one.
+        check(
+            "clearing must not resurrect the ability to report needsInput",
+            !tail.reportableStates.contains(.needsInput)
+        )
+        check(
+            "clearing a session nobody has reported on is harmless",
+            capped.clearNeedsInput(for: "never-seen", from: tail.id, observedAt: t0) == .accepted
+                && capped.resolve("never-seen", at: t0).state == .unknown
+        )
+        // Nothing but needsInput may be dropped: a clear that also removed the
+        // transcript's own reading would leave the key grey instead of the colour the
+        // same tail witnessed.
+        var retract = StateEngine(sources: [hooks, tail])
+        retract.record(.needsInput, for: "s", from: hooks.id, observedAt: t0)
+        retract.record(.complete, for: "s", from: tail.id, observedAt: t0)
+        retract.clearNeedsInput(for: "s", from: tail.id, observedAt: t0.addingTimeInterval(1))
+        check("clearing left the session with no state at all", retract.resolve("s", at: t0).state == .complete)
+        retract.clearNeedsInput(for: "s", from: tail.id, observedAt: t0.addingTimeInterval(2))
+        check("clearing twice dropped an unrelated reading", retract.resolve("s", at: t0).state == .complete)
 
         // With a hook source also fresh, needsInput becomes visible again — and the
         // full configuration has no permanent blind spot.

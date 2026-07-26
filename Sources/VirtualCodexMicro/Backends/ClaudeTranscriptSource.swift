@@ -19,6 +19,16 @@ import Foundation
 /// deliberately dropped (task 022): a source that catches one tool in ten is worse
 /// than one that says it cannot see the state. Amber comes from hooks or not at all.
 ///
+/// **What it can see, and nothing else can.** The *end* of a prompt, on the reject
+/// path. Rejecting a permission prompt emits no hook event whatsoever — witnessed in
+/// `spikes/needsinput`, both reject affordances, no `PermissionDenied`, no `Stop`, no
+/// `PostToolUseFailure` and no `Notification` after 170 s idle — so
+/// `PermissionRequest` turns a key amber and the hook stream has nothing left to say.
+/// The transcript does record it, so `Reading.promptClearedAt` carries that one fact.
+/// It is deliberately **not** a state: reporting the end of a prompt does not require
+/// the vocabulary to report its beginning, and this source must never have the
+/// latter. See `StateEngine.clearNeedsInput`.
+///
 /// Read-only on `~/.claude`. Nothing here opens a file for writing.
 ///
 /// Two ceilings carried over from the spike, both deliberate:
@@ -93,6 +103,15 @@ public struct ClaudeTranscriptSource: Sendable {
         public let observedAt: Date
         public let liveness: Liveness
         public let pid: Int32?
+        /// When the tail last witnessed a pending permission prompt **stop** being
+        /// pending — a rejection, or an interrupt. `nil` for the overwhelming
+        /// majority of readings, which is the normal case.
+        ///
+        /// Not a state, and not expressible as one here on purpose: `needsInput` is
+        /// outside this source's declared vocabulary and this does not sneak it back
+        /// in. It can only ever take amber down, never light it. `StateEngine`'s
+        /// `clearNeedsInput` is the other half.
+        public let promptClearedAt: Date?
         /// Why this state, in words, for the tooltip and the log. Structural facts
         /// only: no prompt text, no tool names, no paths from inside the transcript.
         public let reason: String
@@ -153,6 +172,7 @@ public struct ClaudeTranscriptSource: Sendable {
                 observedAt: observedAt,
                 liveness: pid == nil ? .unknown : .alive,
                 pid: pid,
+                promptClearedAt: Self.promptCleared(in: cursor.records),
                 reason: reason
             ))
         }
@@ -208,7 +228,8 @@ public struct ClaudeTranscriptSource: Sendable {
                   one.state == other.state,
                   one.observedAt == other.observedAt,
                   one.liveness == other.liveness,
-                  one.pid == other.pid
+                  one.pid == other.pid,
+                  one.promptClearedAt == other.promptClearedAt
             else { return false }
         }
         return true
@@ -320,6 +341,61 @@ public struct ClaudeTranscriptSource: Sendable {
 
         return (.unknown, evidenceTime, "unhandled tail record \(last.type ?? "?")/\(last.subtype ?? "-")")
     }
+
+    /// The newest moment the tail shows a permission prompt being answered, or `nil`.
+    ///
+    /// This is the only witness there is. Rejecting a prompt emits no hook event at
+    /// all — witnessed in `spikes/needsinput` on both reject affordances: no
+    /// `PermissionDenied`, no `Stop`, no `PostToolUseFailure`, and no `Notification`
+    /// after 170 s idle. `PermissionRequest` turns the key amber and nothing in the
+    /// hook stream can ever turn it off again, so without this the first rejection
+    /// leaves a slot amber for the life of the session.
+    ///
+    /// Two markers, both taken from real captures, both on **`user`** records:
+    ///
+    ///     {"type":"tool_result","is_error":true,
+    ///      "content":"The user doesn't want to proceed with this tool use. …"}
+    ///     {"type":"text","text":"[Request interrupted by user for tool use]"}
+    ///
+    /// `is_error: true` on its own is emphatically **not** the signal — 40 routine
+    /// occurrences in the tailing spike's corpus (file not read yet, string not found,
+    /// exit 1, command timed out), and one of those clearing a live prompt would hide
+    /// a blocked agent. Both conditions are required together: the CLI's own sentence
+    /// discriminates (5 matches in the same corpus, every one a real rejection) and
+    /// `is_error` keeps a quotation of that sentence in ordinary tool output from
+    /// counting.
+    ///
+    /// Matched only inside `user` records because the assistant quotes both strings
+    /// whenever it *discusses* them — this repository's own transcripts contain the
+    /// prose, and an assistant paragraph must not clear a real prompt. A typed prompt
+    /// cannot spoof it either: `message.content` is a plain string there, which
+    /// decodes to no blocks at all.
+    ///
+    /// The prefix match on the interrupt marker covers the plain
+    /// `[Request interrupted by user]` variant too (3 occurrences): a bare interrupt
+    /// also means nothing is waiting.
+    private static func promptCleared(in records: [Record]) -> Date? {
+        var cleared: Date?
+        var newestSoFar: Date?
+        for record in records {
+            if let stamped = record.timestamp?.date { newestSoFar = stamped }
+            guard record.type == "user",
+                  record.message?.content.contains(where: { $0.endsAPrompt }) == true
+            else { continue }
+            // Trap 1 again, from the safe side. Every witnessed marker carried its own
+            // timestamp; if one ever does not, fall back to the newest timestamp at or
+            // *before* it and never a later one. Underestimating the moment can only
+            // leave amber up for another poll, while overestimating it could clear a
+            // prompt that opened after the rejection.
+            cleared = record.timestamp?.date ?? newestSoFar ?? cleared
+        }
+        return cleared
+    }
+
+    /// The CLI's fixed rejection sentence, minus the apostrophe so a typographic one
+    /// cannot break the match.
+    private static let rejectionMarker = "want to proceed with this tool use"
+    private static let interruptMarker = "[Request interrupted by user"
 
     /// Types that carry no turn-state meaning. Trap 2 lives here.
     private static let noiseTypes: Set<String> = [
@@ -511,10 +587,49 @@ public struct ClaudeTranscriptSource: Sendable {
         let type: String?
         let id: String?
         let toolUseID: String?
+        let text: String?
+        let isError: Bool?
+        /// `tool_result.content` is a plain string in every captured rejection, but the
+        /// schema also allows an array of blocks. Decoded by hand for that reason: a
+        /// throw here would fail the whole `[Block]` decode and lose the `tool_use`
+        /// pairing the `running`/`idle` rules depend on, so an unexpected shape costs
+        /// this one block its content and nothing else.
+        let content: String?
 
         enum CodingKeys: String, CodingKey {
-            case type, id
+            case type, id, text, content
             case toolUseID = "tool_use_id"
+            case isError = "is_error"
+        }
+
+        init(from decoder: any Decoder) throws {
+            let c = try? decoder.container(keyedBy: CodingKeys.self)
+            type = try? c?.decodeIfPresent(String.self, forKey: .type) ?? nil
+            id = try? c?.decodeIfPresent(String.self, forKey: .id) ?? nil
+            toolUseID = try? c?.decodeIfPresent(String.self, forKey: .toolUseID) ?? nil
+            text = try? c?.decodeIfPresent(String.self, forKey: .text) ?? nil
+            isError = try? c?.decodeIfPresent(Bool.self, forKey: .isError) ?? nil
+            if let string = try? c?.decodeIfPresent(String.self, forKey: .content) ?? nil {
+                content = string
+            } else if let nested = try? c?.decode([Block].self, forKey: .content) {
+                content = nested.compactMap(\.text).joined(separator: "\n")
+            } else {
+                content = nil
+            }
+        }
+
+        /// Whether this block is one of the two markers that a permission prompt has
+        /// been answered. See `promptCleared(in:)` for why both halves of the
+        /// `tool_result` condition are required.
+        var endsAPrompt: Bool {
+            switch type {
+            case "tool_result":
+                isError == true && content?.contains(rejectionMarker) == true
+            case "text":
+                text?.hasPrefix(interruptMarker) == true
+            default:
+                false
+            }
         }
     }
 
@@ -585,6 +700,25 @@ public extension ClaudeTranscriptSource {
         func toolUse(_ id: String, _ name: String) -> String {
             "{\"type\":\"tool_use\",\"id\":\"\(id)\",\"name\":\"\(name)\"}"
         }
+        func user(_ blocks: String, at time: String) -> String {
+            line("\"type\":\"user\"", "\"timestamp\":\"\(time)\"",
+                 "\"message\":{\"content\":[\(blocks)]}")
+        }
+        func toolResult(_ id: String, error: Bool, _ content: String) -> String {
+            "{\"type\":\"tool_result\",\"tool_use_id\":\"\(id)\",\"is_error\":\(error)," +
+            "\"content\":\"\(content)\"}"
+        }
+        func textBlock(_ text: String) -> String {
+            "{\"type\":\"text\",\"text\":\"\(text)\"}"
+        }
+        func turnEnd(at time: String) -> String {
+            line("\"type\":\"system\"", "\"subtype\":\"turn_duration\"", "\"timestamp\":\"\(time)\"")
+        }
+        // Verbatim from spikes/needsinput/capture-no and capture-deny — both reject
+        // affordances produced this exact pair.
+        let rejectionText =
+            "The user doesn't want to proceed with this tool use. The tool use was rejected …"
+        let interruptText = "[Request interrupted by user for tool use]"
         // The cluster from trap 2, in the order it actually appears, none of it
         // timestamped.
         let metadataCluster = [
@@ -624,8 +758,51 @@ public extension ClaudeTranscriptSource {
             "asking-fresh.jsonl": [assistant("tool_use", toolUse("t8", "AskUserQuestion"), at: fresh)],
         ]
 
+        // 7. A rejected permission prompt, in the record order the spike captured.
+        let rejected = ["rejected.jsonl": [
+            assistant("tool_use", toolUse("r1", "Bash"), at: earlier),
+            user(toolResult("r1", error: true, rejectionText), at: fresh),
+            user(textBlock(interruptText), at: fresh),
+            turnEnd(at: fresh),
+        ]]
+
+        // 8. A routine failed tool call. `is_error: true` and NOT a rejection: 40 of
+        //    these in the corpus, and any one of them clearing a live prompt would hide
+        //    a blocked agent.
+        let toolError = ["tool-error.jsonl": [
+            assistant("tool_use", toolUse("e1", "Bash"), at: earlier),
+            user(toolResult("e1", error: true, "Exit code 1: command not found"), at: fresh),
+            turnEnd(at: fresh),
+        ]]
+
+        // 8b. A *successful* tool call whose output happens to quote the sentence —
+        //     `grep` over this repository's own findings does exactly that. The
+        //     is_error half of the condition is what stops it counting.
+        let quotingOutput = ["quoting-output.jsonl": [
+            assistant("tool_use", toolUse("q1", "Bash"), at: earlier),
+            user(toolResult("q1", error: false, rejectionText), at: fresh),
+            turnEnd(at: fresh),
+        ]]
+
+        // 9. A bare interrupt, no tool_result. Also means nothing is waiting.
+        let interrupted = ["interrupted.jsonl": [
+            assistant("end_turn", textBlock("x"), at: earlier),
+            user(textBlock("[Request interrupted by user]"), at: fresh),
+            turnEnd(at: fresh),
+        ]]
+
+        // 10. The assistant *talking about* a rejection. This repository's own
+        //     transcripts contain both markers as prose, so an assistant paragraph must
+        //     never clear a real prompt.
+        let quoted = ["quoted.jsonl": [
+            assistant("end_turn", textBlock(interruptText) + "," + textBlock(rejectionText), at: fresh),
+        ]]
+
         var fixtures: [String: [String]] = [:]
-        for group in [boundary, midTool, doubled, resumed, asking] { fixtures.merge(group) { a, _ in a } }
+        for group in [boundary, midTool, doubled, resumed, asking, rejected, toolError,
+                      quotingOutput, interrupted, quoted] {
+            fixtures.merge(group) { a, _ in a }
+        }
 
         do {
             try FileManager.default.createDirectory(at: project, withIntermediateDirectories: true)
@@ -726,6 +903,89 @@ public extension ClaudeTranscriptSource {
             "a fresh unresolved tool call is running, not waiting",
             state(withProcesses, "asking-fresh.jsonl") == .running
         )
+        // The reject path. A rejection is the one thing about a permission prompt this
+        // source can witness, and it must express it WITHOUT reporting needsInput.
+        func reading(_ file: String) -> Reading? {
+            withProcesses.first { URL(filePath: $0.transcriptPath).lastPathComponent == file }
+        }
+        check("a rejection is dated from its own record", reading("rejected.jsonl")?.promptClearedAt == freshDate)
+        check("a bare interrupt also ends a prompt", reading("interrupted.jsonl")?.promptClearedAt == freshDate)
+        check(
+            "a tool_result with is_error true is not a rejection",
+            reading("tool-error.jsonl")?.promptClearedAt == nil
+        )
+        check(
+            "a failed tool call must not read as error",
+            state(withProcesses, "tool-error.jsonl") == .complete
+        )
+        check(
+            "the assistant quoting the markers must not end a prompt",
+            reading("quoted.jsonl")?.promptClearedAt == nil
+        )
+        check(
+            "successful tool output quoting the sentence must not end a prompt",
+            reading("quoting-output.jsonl")?.promptClearedAt == nil
+        )
+        check(
+            "nothing else in the fixtures ends a prompt",
+            withProcesses.filter { $0.promptClearedAt != nil }.count == 2
+        )
+        check(
+            "the tail still resolves the rejected tool call, so the turn reads as ended",
+            state(withProcesses, "rejected.jsonl") == .complete
+        )
+
+        // Through the engine, which is where it has to work: hooks turn the key amber
+        // and nothing in the hook stream ever turns it off again.
+        if let rejection = reading("rejected.jsonl"), let clearedAt = rejection.promptClearedAt {
+            let hooks = StateSource.claudeHooks
+            let amberAt = clearedAt.addingTimeInterval(-1) // PermissionRequest, then the reject
+            var engine = StateEngine(sources: [hooks, source])
+            engine.record(.needsInput, for: rejection.sessionID, from: hooks.id, observedAt: amberAt)
+            engine.record(rejection.state, for: rejection.sessionID, from: source.id, observedAt: rejection.observedAt)
+            check(
+                "PermissionRequest should still win before the rejection is seen",
+                engine.resolve(rejection.sessionID, at: clearedAt).state == .needsInput
+            )
+            check(
+                "clearing needsInput must be accepted from a source that cannot report it",
+                engine.clearNeedsInput(for: rejection.sessionID, from: source.id, observedAt: clearedAt) == .accepted
+            )
+            let after = engine.resolve(rejection.sessionID, at: clearedAt)
+            check("a witnessed rejection must take the key off amber", after.state != .needsInput)
+            check("and must leave the state the transcript actually witnessed", after.state == rejection.state)
+            check("clearing must not be logged as a rejected ingest", engine.rejections.isEmpty)
+
+            // The trap that makes the timestamp load-bearing: the marker stays in the
+            // tail window, so this runs again on every poll. A prompt opened *after* it
+            // must survive.
+            let nextPrompt = clearedAt.addingTimeInterval(5)
+            engine.record(.needsInput, for: rejection.sessionID, from: hooks.id, observedAt: nextPrompt)
+            engine.clearNeedsInput(for: rejection.sessionID, from: source.id, observedAt: clearedAt)
+            check(
+                "a stale rejection marker must not clear the next prompt",
+                engine.resolve(rejection.sessionID, at: nextPrompt).state == .needsInput
+            )
+        } else {
+            failures.append("the rejection fixture produced no reading to test the engine with")
+        }
+
+        // The other half: a failed tool call offers nothing to clear, so amber stands.
+        if let routine = reading("tool-error.jsonl") {
+            let hooks = StateSource.claudeHooks
+            var engine = StateEngine(sources: [hooks, source])
+            let amberAt = routine.observedAt.addingTimeInterval(-1)
+            engine.record(.needsInput, for: routine.sessionID, from: hooks.id, observedAt: amberAt)
+            engine.record(routine.state, for: routine.sessionID, from: source.id, observedAt: routine.observedAt)
+            if let cleared = routine.promptClearedAt {
+                engine.clearNeedsInput(for: routine.sessionID, from: source.id, observedAt: cleared)
+            }
+            check(
+                "a routine tool failure must not take a key off amber",
+                engine.resolve(routine.sessionID, at: routine.observedAt).state == .needsInput
+            )
+        }
+
         for readings in [withProcesses, withoutProcesses] {
             check(
                 "this source must never report needsInput",

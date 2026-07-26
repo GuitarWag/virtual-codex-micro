@@ -514,21 +514,36 @@ public actor OwnedSession {
 
     // MARK: Configuration
 
-    /// The bytes we send for each answer.
+    /// The bytes we send for each answer. **A calibration knob, not a constant** — but
+    /// no longer a guess, and deliberately containing no option number at all.
     ///
-    /// **A calibration knob, not a constant.** The spike never drove the real
-    /// interactive `claude` TUI (its "not tested" list is explicit), so these are
-    /// the best available guess at a numbered permission dialog: `1` selects the
-    /// first option, `esc` rejects. Deliberately *no* trailing Return on approve —
-    /// if the digit already commits, a stray Return would answer whatever dialog
-    /// comes next, whereas a missing Return produces no confirmation, which lands
-    /// in `.unconfirmed` and greys the key. One of those failures is recoverable.
+    /// The needsInput spike drove the real interactive TUI and captured the dialog:
+    ///
+    ///     ❯1. Yes
+    ///      2. Yes, and don't ask again for: /bin/echo vcm-amber-probe *
+    ///      3. No
+    ///
+    /// so `3` rejected *that* prompt. A prompt with a different option list puts "No"
+    /// somewhere else, and on an approval dialog answering the wrong option is the
+    /// worst failure available. `answer(_:suggestions:keys:)` explains why the payload
+    /// cannot supply the index either. So both answers are layout-free:
+    ///
+    /// - `approve` is Return, which takes whichever option the CLI has **already**
+    ///   selected — the plain "Yes" above, the one that grants nothing beyond this
+    ///   call. It is also the keystroke the spike's `allow` run actually approved with.
+    /// - `reject` is ESC, witnessed to cancel on both reject affordances and
+    ///   independent of the option list.
+    ///
+    /// Still exactly one keystroke on approve, with no trailing Return, and now for
+    /// two reasons rather than one: a stray Return would answer whatever dialog comes
+    /// next, and here Return *is* the answer. A missing confirmation only lands in
+    /// `.unconfirmed` and greys the key, which is the recoverable failure.
     public struct Keystrokes: Sendable, Equatable {
         public var approve: String
         public var reject: String
         public var submit: String
 
-        public init(approve: String = "1", reject: String = "\u{1b}", submit: String = "\r") {
+        public init(approve: String = "\r", reject: String = "\u{1b}", submit: String = "\r") {
             self.approve = approve
             self.reject = reject
             self.submit = submit
@@ -627,6 +642,76 @@ public actor OwnedSession {
             if let command = toolInput?["command"]?.stringValue { return "\(tool): \(command)" }
             if let path = toolInput?["file_path"]?.stringValue { return "\(tool): \(path)" }
             return tool
+        }
+    }
+
+    /// The bytes for one answer, or the reason there are none.
+    public enum PermissionAnswer: Sendable, Equatable {
+        case type(String)
+        /// We will not type into this dialog, and why. A disabled key is acceptable;
+        /// answering the wrong option is not.
+        case refuse(String)
+    }
+
+    /// What to type to answer a dialog, derived from the dialog's own payload.
+    ///
+    /// **No option index is derived, because `permission_suggestions` does not carry
+    /// one.** Witnessed in `spikes/needsinput` (`capture-allow/stream.txt` against the
+    /// payload in `FINDINGS.md`): a **three**-option prompt — Yes / "Yes, and don't ask
+    /// again for: …" / No — arrived with a `permission_suggestions` array of exactly
+    /// **one** element, the `addRules` rule behind option 2. The array enumerates the
+    /// rules the dialog offers to persist, not the options and not their order, so its
+    /// count is not the option count and nothing in it locates "No". Deriving
+    /// `2 + suggestions.count` from that single sample would be the same bet the
+    /// hard-coded `3` was, in a costume, and it would be wrong in the one direction
+    /// that matters: option 2 is a *broader* approval than option 1.
+    ///
+    /// So the payload does not choose the keystroke. What it does is act as a tripwire
+    /// on the reasoning above: every suggestion measured is an object carrying
+    /// `behavior: "allow"`, and anything else — a non-array, a non-object entry, a
+    /// missing behavior, a `deny` suggestion — is a dialog shaped differently from the
+    /// one this was checked against, so approve refuses instead of typing into it.
+    ///
+    /// Reject is offered either way. ESC cancels regardless of layout, it is the
+    /// affordance the dialog itself advertises, and cancelling is the safe direction —
+    /// the same asymmetry `verdict(for:from:)` is built on.
+    static func answer(
+        _ kind: InFlight.Kind, suggestions: JSONValue?, keys: Keystrokes
+    ) -> PermissionAnswer {
+        switch kind {
+        case .reject:
+            return .type(keys.reject)
+        case .prompt:
+            return .type(keys.submit)
+        case .approve:
+            if let problem = unmeasuredDialog(suggestions) { return .refuse(problem) }
+            return .type(keys.approve)
+        }
+    }
+
+    /// Why this payload is not the shape the approve keystroke was measured against, or
+    /// `nil` when it is. Absent, null and empty all pass: a dialog with no rule to
+    /// persist is the plain two-option Yes/No, which is the simpler case rather than a
+    /// stranger one, and Return still takes its pre-selected option.
+    static func unmeasuredDialog(_ suggestions: JSONValue?) -> String? {
+        switch suggestions {
+        case nil, .null:
+            return nil
+        case .array(let entries):
+            for entry in entries {
+                guard let fields = entry.objectValue else {
+                    return "a permission_suggestions entry is not an object, so this dialog is not the shape approve was measured against"
+                }
+                guard let behavior = fields["behavior"]?.stringValue else {
+                    return "a permission_suggestions entry carries no behavior, so we cannot tell what this dialog is offering"
+                }
+                guard behavior == "allow" else {
+                    return "permission_suggestions offers behavior '\(behavior)', which no measured dialog did — refusing to approve rather than guess an option"
+                }
+            }
+            return nil
+        default:
+            return "permission_suggestions is not an array, so we cannot tell what this dialog is offering"
         }
     }
 
@@ -804,6 +889,25 @@ public actor OwnedSession {
         return true
     }
 
+    /// The reject path's only witness, and it does not come from a hook.
+    ///
+    /// Rejecting a prompt emits no hook event at all (witnessed, `spikes/needsinput`),
+    /// so nothing in `noteHook` can ever close the gate after one and `pending` would
+    /// stay set for the life of the session — meaning the next `approve()` would type
+    /// Return into whatever happened to be on screen. That is precisely the blind
+    /// injection the gate exists to prevent, so the transcript's witness has to reach
+    /// it: feed `ClaudeTranscriptSource.Reading.promptClearedAt` here.
+    ///
+    /// Strictly newer, for the same reason `StateEngine.clearNeedsInput` compares
+    /// times: the marker stays inside the tailer's window for the next 80 records, so
+    /// an old one must never close a dialog that opened after it.
+    @discardableResult
+    public func notePromptCleared(at time: Date) -> Bool {
+        guard let dialog = pending, dialog.at < time else { return false }
+        pending = nil
+        return true
+    }
+
     /// Which events count as confirmation, and the one case where an event proves
     /// the *opposite* of what we asked for.
     ///
@@ -850,9 +954,9 @@ public actor OwnedSession {
     public func dispatch(_ command: AgentCommand) async -> ActionReport {
         switch command {
         case .approve:
-            return await answerPermission(.approve, command: command, keys: configuration.keys.approve)
+            return await answerPermission(.approve, command: command)
         case .reject:
-            return await answerPermission(.reject, command: command, keys: configuration.keys.reject)
+            return await answerPermission(.reject, command: command)
         case .sendPrompt(let text):
             return await send(prompt: text)
         case .setEffort(let step):
@@ -873,8 +977,7 @@ public actor OwnedSession {
     /// indistinguishable from a working one.
     private func answerPermission(
         _ kind: InFlight.Kind,
-        command: AgentCommand,
-        keys: String
+        command: AgentCommand
     ) async -> ActionReport {
         guard let child, child.status().isRunning else {
             return ActionReport(
@@ -899,6 +1002,16 @@ public actor OwnedSession {
                 outcome: .failed("an answer is already waiting to be confirmed"),
                 forcedState: nil
             )
+        }
+
+        // Derived from this dialog's payload, never from an option number. A payload we
+        // cannot read disables approve instead of typing a digit into it.
+        let keys: String
+        switch Self.answer(kind, suggestions: dialog.suggestions, keys: configuration.keys) {
+        case .type(let bytes):
+            keys = bytes
+        case .refuse(let why):
+            return ActionReport(command: command, outcome: .failed(why), forcedState: nil)
         }
 
         inFlight = InFlight(kind: kind, toolName: dialog.toolName, injectedAt: Date(), verdict: nil)
@@ -1393,6 +1506,68 @@ public extension OwnedSession {
         check("claude.owned must outrank transcript inference",
               stateSource.confidence > StateSource.claudeTranscript.confidence)
 
+        // 10. Keystroke derivation (task 044). Pure, so it runs without a pty.
+        //
+        // The "three-option" payload is the real one from spikes/needsinput: three
+        // options on screen (Yes / Yes-and-don't-ask / No) and exactly ONE suggestion.
+        // That mismatch is the finding — a count cannot be an index — so what is
+        // asserted is that neither answer contains an option number at all.
+        let threeOption = JSONValue.array([.object([
+            "type": .string("addRules"), "behavior": .string("allow"),
+            "destination": .string("localSettings"),
+            "rules": .array([.object([
+                "toolName": .string("Bash"),
+                "ruleContent": .string("/bin/echo vcm-amber-probe *"),
+            ])]),
+        ])])
+        // Nothing to persist: the plain two-option Yes/No dialog.
+        let twoOption = JSONValue.array([])
+        let keys = Keystrokes()
+
+        for (label, payload) in [("three-option", threeOption), ("two-option", twoOption)] {
+            check("approve refused the \(label) payload",
+                  answer(.approve, suggestions: payload, keys: keys) == .type(keys.approve))
+            check("reject refused the \(label) payload",
+                  answer(.reject, suggestions: payload, keys: keys) == .type(keys.reject))
+        }
+        check("approve refused a dialog with no suggestions field",
+              answer(.approve, suggestions: nil, keys: keys) == .type(keys.approve))
+        check("approve refused a null suggestions field",
+              answer(.approve, suggestions: .null, keys: keys) == .type(keys.approve))
+
+        // The whole point: no digit, and exactly one keystroke, so nothing can select
+        // an option by position and nothing carries a trailing Return.
+        for (label, bytes) in [("approve", keys.approve), ("reject", keys.reject)] {
+            check("\(label) contains an option number", !bytes.contains(where: \.isNumber))
+            check("\(label) is not a single keystroke", bytes.count == 1)
+        }
+        check("approve must be Return, which takes the dialog's own pre-selected option",
+              keys.approve == "\r")
+        check("reject must be ESC, which cancels regardless of the option list",
+              keys.reject == "\u{1b}")
+
+        // Payloads we cannot interpret: refuse, never guess. A deny suggestion counts —
+        // no measured dialog carried one, so we do not know what its options are.
+        let uninterpretable: [(String, JSONValue)] = [
+            ("an entry that is not an object", .array([.string("allow")])),
+            ("an entry with no behavior", .array([.object(["type": .string("addRules")])])),
+            ("a deny suggestion", .array([.object(["behavior": .string("deny")])])),
+            ("an unknown behavior", .array([.object(["behavior": .string("ask")])])),
+            ("a bare object instead of an array", .object(["behavior": .string("allow")])),
+            ("a string", .string("allow")),
+            ("a number", .int(3)),
+        ]
+        for (label, payload) in uninterpretable {
+            if case .refuse(let why) = answer(.approve, suggestions: payload, keys: keys) {
+                check("refusing \(label) says nothing useful", why.count > 20)
+            } else {
+                failures.append("approve typed into \(label)")
+            }
+            // ESC still cancels whatever this is, and cancelling is the safe direction.
+            check("reject was refused for \(label)",
+                  answer(.reject, suggestions: payload, keys: keys) == .type(keys.reject))
+        }
+
         // Effort levels are the CLI's own, and the dial cannot fall off either end.
         check("effort levels are not the CLI's list",
               effortLevels == ["low", "medium", "high", "xhigh", "max"])
@@ -1449,7 +1624,13 @@ public extension OwnedSession {
 
         /// A real `HookEvent`, built the way the forwarder delivers one so the parse
         /// path is exercised rather than bypassed.
-        func hook(_ name: String, tool: String? = nil, session: String = sessionID, agentID: String? = nil) -> HookEvent? {
+        func hook(
+            _ name: String,
+            tool: String? = nil,
+            session: String = sessionID,
+            agentID: String? = nil,
+            suggestions: JSONValue = .array([.object(["behavior": .string("allow")])])
+        ) -> HookEvent? {
             var payload: [String: JSONValue] = [
                 "hook_event_name": .string(name),
                 "session_id": .string(session),
@@ -1458,7 +1639,7 @@ public extension OwnedSession {
             if let tool {
                 payload["tool_name"] = .string(tool)
                 payload["tool_input"] = .object(["command": .string("/bin/rm -rf build")])
-                payload["permission_suggestions"] = .array([.object(["behavior": .string("allow")])])
+                payload["permission_suggestions"] = suggestions
             }
             if let agentID { payload["agent_id"] = .string(agentID) }
             guard let body = try? JSONValue.object(payload).canonicalData() else { return nil }
@@ -1469,7 +1650,12 @@ public extension OwnedSession {
               let postToolUse = hook("PostToolUse", tool: "Bash"),
               let denied = hook("PermissionDenied", tool: "Bash"),
               let otherSession = hook("PermissionRequest", tool: "Bash", session: "someone-else"),
-              let subagent = hook("PermissionRequest", tool: "Bash", agentID: "sub-1")
+              let subagent = hook("PermissionRequest", tool: "Bash", agentID: "sub-1"),
+              // A dialog whose payload we cannot read: approve must type nothing.
+              let strange = hook(
+                  "PermissionRequest", tool: "Bash",
+                  suggestions: .array([.object(["behavior": .string("deny")])])
+              )
         else { return failures + ["could not build the hook fixtures"] }
 
         // The gate: nothing is written until a PermissionRequest says a dialog is up,
@@ -1531,6 +1717,78 @@ public extension OwnedSession {
             return problems
         }
         failures += gate ?? []
+
+        // Task 044 end to end: a dialog whose payload we cannot interpret gets NO
+        // keystroke on approve, and ESC still works. The digit this replaced would have
+        // been typed into it blind.
+        let unreadable = blocking("unreadable payload") { () -> [String] in
+            var problems: [String] = []
+            let owned = gateSession(fixtures: fixtures, window: 0.1)
+            guard let child = try? PTYChild.spawn(executable: "/bin/sh") else {
+                return ["unreadable-payload fixture could not spawn /bin/sh"]
+            }
+            await owned.adoptForSelfCheck(child)
+            _ = await owned.noteHook(strange)
+
+            let report = await owned.approve()
+            if case .failed(let why) = report.outcome {
+                if !why.contains("behavior") { problems.append("the refusal does not name the payload: '\(why)'") }
+            } else {
+                problems.append("approve on an unreadable payload produced \(report.outcome)")
+            }
+            if report.isDone { problems.append("a refused approve reported done") }
+            if child.bytesRead > 0 || child.writeFailures > 0 {
+                problems.append("a refused approve wrote to the pty anyway")
+            }
+            // The asymmetry: cancelling is safe whatever the payload says.
+            let rejected = await owned.reject()
+            if case .failed = rejected.outcome { problems.append("reject was refused for an unreadable payload") }
+            if child.bytesRead == 0 { problems.append("a gated reject wrote nothing to the pty") }
+            _ = child.terminate(grace: 0.1)
+            return problems
+        }
+        failures += unreadable ?? []
+
+        // Task 043's other half. A rejection fires no hook, so `pending` would stay set
+        // for the life of the session and the next approve would type into whatever is
+        // on screen. The transcript's witness is the only thing that can close it.
+        let gateAfterRejection = blocking("gate after rejection") { () -> [String] in
+            var problems: [String] = []
+            let owned = gateSession(fixtures: fixtures, window: 0.1)
+            guard let child = try? PTYChild.spawn(executable: "/bin/sh") else {
+                return ["rejection-gate fixture could not spawn /bin/sh"]
+            }
+            await owned.adoptForSelfCheck(child)
+            _ = await owned.noteHook(request)
+            if await owned.pendingPermission == nil { return problems + ["the gate did not open"] }
+
+            // A marker older than the dialog is a leftover in the tail window, not this
+            // dialog's rejection.
+            if await owned.notePromptCleared(at: request.observedAt.addingTimeInterval(-1)) {
+                problems.append("a stale rejection marker closed the gate")
+            }
+            if await owned.pendingPermission == nil {
+                problems.append("a stale rejection marker cleared the pending dialog")
+            }
+            if await !owned.notePromptCleared(at: request.observedAt.addingTimeInterval(1)) {
+                problems.append("a witnessed rejection did not close the gate")
+            }
+            if await owned.pendingPermission != nil {
+                problems.append("the pending dialog survived a witnessed rejection")
+            }
+            let after = await owned.approve()
+            if case .failed(let why) = after.outcome {
+                if !why.contains("no permission prompt") {
+                    problems.append("approve after a rejection failed for the wrong reason: '\(why)'")
+                }
+            } else {
+                problems.append("approve after a witnessed rejection produced \(after.outcome)")
+            }
+            if child.bytesRead > 0 { problems.append("approve after a rejection typed into the session blind") }
+            _ = child.terminate(grace: 0.1)
+            return problems
+        }
+        failures += gateAfterRejection ?? []
 
         // A second press while the first answer is still in flight must not inject a
         // second keystroke: the dialog is already answered, so the extra key lands in

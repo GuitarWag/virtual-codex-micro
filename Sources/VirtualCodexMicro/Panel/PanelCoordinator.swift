@@ -194,6 +194,7 @@ final class PanelCoordinator: ObservableObject {
 
     private func ingest(_ readings: [ClaudeTranscriptSource.Reading]) {
         for reading in readings {
+            clearAmber(reading)
             record(reading.state, for: reading.sessionID, from: .claudeTranscript)
             engine.setLiveness(reading.liveness, for: reading.sessionID)
             knownPIDs[reading.sessionID] = reading.pid
@@ -211,6 +212,36 @@ final class PanelCoordinator: ObservableObject {
                 pid: reading.pid
             )
         }
+    }
+
+    /// The reject path. A rejected permission prompt fires no hook at all, so the
+    /// amber `PermissionRequest` left behind can only be taken down by the transcript
+    /// — and the transcript is not allowed to report `needsInput`, so it retracts
+    /// rather than reports. Logged when it actually changes the resolution, because a
+    /// key that stops being amber for no stated reason is exactly the unfalsifiable
+    /// colour change this app is built to avoid.
+    private func clearAmber(_ reading: ClaudeTranscriptSource.Reading) {
+        guard let cleared = reading.promptClearedAt else { return }
+        let now = Date()
+        let before = engine.resolve(reading.sessionID, at: now).state
+        engine.clearNeedsInput(
+            for: reading.sessionID,
+            from: StateSource.claudeTranscript.id,
+            observedAt: cleared
+        )
+        let after = engine.resolve(reading.sessionID, at: now).state
+        guard before != after else { return }
+        log.record(ActivityEntry(
+            at: now,
+            slot: slot(for: reading.sessionID),
+            sessionID: reading.sessionID,
+            event: .stateChange(
+                from: before, to: after,
+                source: StateSource.claudeTranscript.id,
+                confidence: StateSource.claudeTranscript.confidence,
+                reason: "the transcript witnessed the permission prompt being answered; a rejection fires no hook"
+            )
+        ))
     }
 
     /// Fill empty slots, preferring sessions that are actually alive.
