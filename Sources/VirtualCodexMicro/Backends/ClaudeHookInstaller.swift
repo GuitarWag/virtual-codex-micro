@@ -83,8 +83,40 @@ public struct ClaudeHookInstaller: Sendable {
     public static let defaultSettingsURL = URL(fileURLWithPath: NSHomeDirectory())
         .appendingPathComponent(".claude/settings.json")
 
-    public static let defaultForwarderURL = supportDirectory
+    /// The forwarder CANNOT live in Application Support, and this is a bug that
+    /// shipped and had to be found by running it.
+    ///
+    /// Claude Code invokes a command hook through a shell, so a command string
+    /// containing a space is split: `~/Library/Application Support/...` becomes an
+    /// attempt to run `~/Library/Application` with `Support/...` as an argument. It
+    /// fails, and because these are `async: true` hooks the failure is discarded —
+    /// no error anywhere, no events, nothing to debug. The installer's own check
+    /// passed the whole time because it invoked the script via `/bin/sh` directly,
+    /// which works fine; only Claude Code's own invocation path breaks.
+    ///
+    /// So: a dedicated whitespace-free directory of our own. Not `~/.claude/hooks`,
+    /// which is the user's, and not Application Support, which has the space. The
+    /// spool stays in Application Support — nothing but our own code opens it.
+    public static let forwarderDirectory = FileManager.default
+        .homeDirectoryForCurrentUser
+        .appendingPathComponent(".virtual-codex-micro", isDirectory: true)
+
+    public static let defaultForwarderURL = forwarderDirectory
         .appendingPathComponent("claude-hook.sh")
+
+    /// Paths we used to install to and must still clean up on uninstall, or an
+    /// upgrade leaves a dead hook entry pointing at a script nobody removes.
+    public static let legacyForwarderURLs: [URL] = [
+        supportDirectory.appendingPathComponent("claude-hook.sh")
+    ]
+
+    /// A command hook's path must survive being handed to a shell. Whitespace is
+    /// the failure we hit; the quoting characters would break the same way.
+    public static func isShellSafe(_ url: URL) -> Bool {
+        let path = url.path
+        return !path.isEmpty && !path.contains(where: { $0.isWhitespace })
+            && !path.contains("'") && !path.contains("\"")
+    }
 
     // MARK: - What we subscribe to
 
@@ -141,14 +173,35 @@ public struct ClaudeHookInstaller: Sendable {
         }
 
         let forwarderPath = forwarderURL.path
-        let updated: JSONValue = switch action {
+        var updated: JSONValue = switch action {
         case .install: try installing(into: original, forwarderPath: forwarderPath)
         case .uninstall: try uninstalling(from: original, forwarderPath: forwarderPath)
+        }
+        // Sweep paths we used to install to, whichever direction we are going.
+        // Uninstall keyed only off the CURRENT forwarder path, so moving the install
+        // location — which we had to do, because the old one contained a space and
+        // silently broke every hook — orphaned every entry from the previous
+        // version: settings pointing at a script that no longer exists, invisible
+        // because async hooks discard their failures. Install sweeps too, so an
+        // upgrade repairs itself instead of stacking a second set of entries.
+        for legacy in Self.legacyForwarderURLs where legacy.path != forwarderPath {
+            updated = try uninstalling(from: updated, forwarderPath: legacy.path)
         }
 
         let canonicalOriginal = try original.canonicalData()
         let canonicalUpdated = try updated.canonicalData()
-        let isNoOp = updated == original
+        // "Nothing to do" must mean the whole installation is intact, not just that
+        // the settings file matches. Computing it from JSON alone produced a state
+        // where settings referenced a forwarder that had never been written — every
+        // hook pointing at a missing script, install declining to fix it because the
+        // config "already looked right", and async hooks swallowing the failure. For
+        // an install, the script existing and being executable is part of the goal.
+        let forwarderReady: Bool = {
+            guard action == .install else { return true }
+            guard FileManager.default.isExecutableFile(atPath: forwarderPath) else { return false }
+            return true
+        }()
+        let isNoOp = updated == original && forwarderReady
 
         return Plan(
             action: action,
@@ -279,6 +332,13 @@ public struct ClaudeHookInstaller: Sendable {
 
         if plan.action == .uninstall {
             try? fm.removeItem(at: plan.forwarderURL)
+            // The directory too, if we created it and it is now empty.
+            try? fm.removeItem(at: Self.forwarderDirectory)
+        }
+        // Legacy scripts go on both paths: leaving an executable behind that
+        // nothing references is litter in the user's home directory.
+        for legacy in Self.legacyForwarderURLs where legacy.path != plan.forwarderURL.path {
+            try? fm.removeItem(at: legacy)
         }
     }
 

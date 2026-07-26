@@ -213,12 +213,22 @@ final class PanelCoordinator: ObservableObject {
         }
     }
 
-    /// Fill empty slots in the registry's own priority order, so a blocked agent
-    /// is never the one left unbound.
+    /// Fill empty slots, preferring sessions that are actually alive.
+    ///
+    /// The registry's own order puts attention-worthy sessions first and then falls
+    /// back to session id, which is right for "do not hide a blocked agent" but says
+    /// nothing about liveness. Used raw it bound six long-dead transcripts and left
+    /// all three running sessions unbound — the panel filled up with history. A dead
+    /// session has no pid, so it cannot be focused and its state can only ever be
+    /// `unknown`; a live one is the entire point of the panel.
+    ///
+    /// So: alive first, then the registry's ordering within each group, so the
+    /// blocked-agent guarantee still holds among sessions of equal liveness.
     private func autobindFreeSlots() {
         let free = (0 ..< PanelLayout.agentKeyCount).filter { registry.binding(at: $0) == nil }
         guard !free.isEmpty else { return }
-        var candidates = registry.unbound(from: discoveredSessions)
+        let ordered = registry.unbound(from: discoveredSessions)
+        var candidates = ordered.filter { $0.pid != nil } + ordered.filter { $0.pid == nil }
         for slot in free {
             guard let next = candidates.first else { break }
             candidates.removeFirst()

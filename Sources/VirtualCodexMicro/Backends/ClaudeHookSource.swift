@@ -511,6 +511,22 @@ public extension ClaudeHookSource {
     /// if anything here ever writes to it, this check fails loudly rather than the
     /// user discovering it.
     static func selfCheckFailures() -> [String] {
+        var pathFailures: [String] = []
+        // The invariant that was missing when this shipped broken: a command hook
+        // path is handed to a shell, so whitespace in it silently splits the
+        // command and — with async:true — discards the failure. The old install
+        // location was ~/Library/Application Support/..., which meant no hook ever
+        // ran and nothing reported why.
+        if !ClaudeHookInstaller.isShellSafe(ClaudeHookInstaller.defaultForwarderURL) {
+            pathFailures.append(
+                "forwarder path is not shell-safe: \(ClaudeHookInstaller.defaultForwarderURL.path)"
+            )
+        }
+        for legacy in ClaudeHookInstaller.legacyForwarderURLs
+        where ClaudeHookInstaller.isShellSafe(legacy) {
+            pathFailures.append("legacy path \(legacy.path) is shell-safe, so it should not be legacy")
+        }
+        defer { }
         var failures: [String] = []
         func check(_ name: String, _ condition: Bool) {
             if !condition { failures.append(name) }
@@ -727,6 +743,6 @@ public extension ClaudeHookSource {
         let realAfter = try? Data(contentsOf: realSettings)
         check("the self-check must not touch the real ~/.claude/settings.json", realBefore == realAfter)
 
-        return failures
+        return pathFailures + failures
     }
 }

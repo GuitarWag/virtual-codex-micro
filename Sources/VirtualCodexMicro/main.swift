@@ -62,6 +62,51 @@ if ProcessInfo.processInfo.environment["VCM_SELFTEST"] != nil {
 /// and exit. No window, no hooks installed, read-only. Exists because "the panel
 /// shows six keys" says nothing about whether those keys came from real sessions —
 /// stale bindings from an earlier run look identical to fresh discovery.
+/// Show the settings.json change the hook installer WOULD make, and exit without
+/// making it. This is the consent step: the installer deliberately separates
+/// planning from applying so the diff can be reviewed before anything is written.
+if ProcessInfo.processInfo.environment["VCM_HOOKPLAN"] != nil {
+    do {
+        let plan = try ClaudeHookInstaller.plan(.install)
+        print("settings file : \(plan.settingsURL.path)")
+        print("backup to     : \(plan.backupURL.lastPathComponent)")
+        print("forwarder     : \(plan.forwarderURL.path)")
+        print("spool         : \(plan.spoolDirectory.path)")
+        print("events        : \(plan.events.count) — \(plan.events.joined(separator: ", "))")
+        print("no-op         : \(plan.isNoOp)")
+        print("reformats file: \(plan.reformatsFile)   <- canonical re-serialisation reorders keys and re-indents")
+        print("\n--- diff ---")
+        print(plan.diff)
+    } catch {
+        print("PLAN REFUSED: \(error)")
+    }
+    exit(0)
+}
+
+/// Apply or remove the hooks. Separate flag from VCM_HOOKPLAN on purpose: the
+/// only path that writes the user's config must be explicitly asked for, never a
+/// side effect of inspecting it.
+///   VCM_HOOKAPPLY=install   VCM_HOOKAPPLY=uninstall
+if let action = ProcessInfo.processInfo.environment["VCM_HOOKAPPLY"] {
+    do {
+        let plan = try ClaudeHookInstaller.plan(action == "uninstall" ? .uninstall : .install)
+        if plan.isNoOp {
+            print("no change needed — already in the requested state")
+            exit(0)
+        }
+        try ClaudeHookInstaller.apply(plan)
+        print("applied \(action) to \(plan.settingsURL.path)")
+        print("backup: \(plan.backupURL.path)")
+        print("events: \(plan.events.count)")
+        print("forwarder: \(plan.forwarderURL.path)")
+        print("spool: \(plan.spoolDirectory.path)")
+    } catch {
+        print("REFUSED: \(error)")
+        exit(1)
+    }
+    exit(0)
+}
+
 if ProcessInfo.processInfo.environment["VCM_PROBE"] != nil {
     let live = ClaudeTranscriptSource.liveSessions()
     var source = ClaudeTranscriptSource()
