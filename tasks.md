@@ -122,10 +122,6 @@
   > Given a session id, raise the exact window and tab that owns it. Test Terminal.app, iTerm2 and Ghostty via AppleScript/Automation, plus tmux select-window when the process sits inside a tmux pane. Record which permission prompt each path triggers and which emulators cannot be targeted at all. Focus is the one action that works on observed sessions, so its reliability sets the floor for the product's value. Deliverable: per-emulator support matrix.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
-- [>] [T-VCMPLAN1-011] **State colour tokens for light, dark and high contrast** `priority:high` `assignee:claude` `tags:m1,ui,a11y` `due:2026-08-14`
-  > Semantic colour set defined in Swift code — NOT an asset catalog, because actool ships with Xcode and this machine has Command Line Tools only. Light and dark variants plus a high-contrast pair for each state: white idle, blue running, green complete, amber needs-input, red error, dim unassigned, grey-hatched unknown. Verify contrast of the paired label text against the key fill in all four appearance combinations. Colours are named by meaning, never by hue, so a later palette change touches one place.
-  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
-
 - [>] [T-VCMPLAN1-015] **Mock state driver** `priority:high` `assignee:claude` `tags:m1,state` `due:2026-08-19`
   > Scripted driver that walks the six keys through every state and transition on a timeline, plus a manual override panel in debug builds. Lets M1 be reviewed, screenshotted and QA'd with zero backend, and becomes the fixture for later UI tests. Implements the same protocol the real adapters will, so M2 swaps it out rather than deleting it.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
@@ -138,6 +134,10 @@
 
 - [x] [T-VCMPLAN1-009] **Layout spec and device silhouette frame** `priority:high` `assignee:claude` `tags:m1,ui` `due:2026-08-12`
   > Single source-of-truth layout definition covering all four zones: six agent keys, command cluster, dial on the right, four-way pad lower-left. Rounded device-like silhouette instead of standard window chrome. Positions and ordering follow the reference control map; absolute proportions get tuned for pointer hit targets rather than traced. Every downstream component reads geometry from this one file so a spacing change never means editing six views.
+  > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
+
+- [x] [T-VCMPLAN1-011] **State colour tokens for light, dark and high contrast** `priority:high` `assignee:claude` `tags:m1,ui,a11y` `due:2026-08-14`
+  > Semantic colour set defined in Swift code — NOT an asset catalog, because actool ships with Xcode and this machine has Command Line Tools only. Light and dark variants plus a high-contrast pair for each state: white idle, blue running, green complete, amber needs-input, red error, dim unassigned, grey-hatched unknown. Verify contrast of the paired label text against the key fill in all four appearance combinations. Colours are named by meaning, never by hue, so a later palette change touches one place.
   > Created: 2026-07-26T00:00:00.000Z | Updated: 2026-07-26T00:00:00.000Z
 
 ## BLOCKED

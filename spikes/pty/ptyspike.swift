@@ -362,8 +362,12 @@ case "crash":
 case "orphan":
     let cmd = rest.isEmpty ? ["/bin/sh", "-c", "sleep 300"] : rest
     let c = spawnPTY(cmd)
-    print("child_pid=\(c.pid) parent_pid=\(getpid()) — parent exiting immediately WITHOUT killing child or closing master")
+    // SPIKE_DELAY_MS: how long the parent lives before _exit(0). 0 = exit before the child has
+    // finished setsid()/TIOCSCTTY, which changes the outcome. See FINDINGS.md.
+    let delayMS = UInt32(ProcessInfo.processInfo.environment["SPIKE_DELAY_MS"] ?? "0") ?? 0
+    print("child_pid=\(c.pid) parent_pid=\(getpid()) delay=\(delayMS)ms — parent will _exit(0) WITHOUT killing the child")
     fflush(stdout)
+    if delayMS > 0 { usleep(delayMS * 1000) }
     _exit(0) // hardest case: no atexit, no deinit, no signal handler
 
 // 8. Same, but we close the master fd (pty hangup) and see if that is enough.
