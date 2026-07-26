@@ -367,7 +367,11 @@ public struct SessionRegistry: Sendable {
         // reading left over from a previous binding is evidence about a slot that
         // no longer exists, and letting it survive is how a fresh key inherits a
         // stale colour. A session merely *moving* between slots keeps its
-        // readings — it is the same thread and they are still true.
+        // readings — it is the same thread and they are still true. A slot the
+        // user is *re-confirming* after a failed reconnect needs no forget here
+        // either: `reconnect` dropped those readings the moment it lost
+        // confidence in the id, which is the right moment, and doing it in both
+        // places would leave neither one provably load-bearing.
         if previousSlot == nil { engine.forget(found.id) }
 
         slots[slot] = Slot(binding: SlotBinding(found, at: now), pending: nil)
@@ -693,6 +697,18 @@ public extension SessionRegistry {
         check(
             "the same-id session was not offered first as a rebind candidate",
             resumedStatuses[3].candidateSessionIDs.first == "same-id"
+        )
+        // The user answers the offer by rebinding the same slot to the same id.
+        // This is where a missing forget() actually bites: the slot stops being
+        // flagged, so nothing masks the readings any more, and the pre-resume
+        // `running` would come straight back as a confident colour describing a
+        // process that no longer exists.
+        resumed.bind(session("same-id", pid: 900), to: 3, engine: &resumedEngine, at: t0)
+        check("an explicit rebind left the slot flagged", resumed.pendingRebind(at: 3) == nil)
+        check("the confirmed binding kept the old pid", resumed.binding(at: 3)?.pid == 900)
+        check(
+            "confirming a resumed session inherited its pre-resume colour",
+            resumed.resolve(slot: 3, engine: resumedEngine, at: t0).state == .unknown
         )
         // A missing pid on either side is a doubt, not a pass.
         check(

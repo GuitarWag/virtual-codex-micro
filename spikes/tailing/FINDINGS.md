@@ -67,6 +67,14 @@ streaming chunks. `stop_details` was `null` in every record.
 
 ### Three traps in the format
 
+**Re-verified 2026-07-26 during implementation** against a grown corpus (33 main transcripts, 13,090
+records): trap 1 is **worse** than first measured — 24 of 33 tails end on an untimestamped record, not
+12 of 31. So the backward scan matters more, not less. Trap 3 held (116 of 387 doubled `end_turn`), trap 2
+held (499 cluster occurrences). Subagent transcripts: 21 found, **zero** `turn_duration` records among
+them, so the exclusion rationale is exact. `error` confirmed useless at 5 records in 13,090. The
+session-id trap reproduced live: file `a29ca670…` carries writer id `6e5140c0…` and joins to pid 42513;
+filename matching would report that live session dead.
+
 **Trap 1 — most tail records have no timestamp.** `ai-title`, `mode`, `permission-mode`, `last-prompt`,
 `custom-title`, `agent-name` and `file-history-snapshot` carry no `timestamp` field. 12 of 31 files end
 on one of them, so "the last record's timestamp" is `None` for nearly half the corpus. Scan backwards
