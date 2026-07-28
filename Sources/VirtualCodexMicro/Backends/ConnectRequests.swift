@@ -24,6 +24,9 @@ public struct ConnectRequest: Sendable, Equatable {
     /// 1-based as the user typed it; `nil` means "any free key".
     public let requestedSlot: Int?
     public let surfaceID: String?
+    /// A colour to force on this session's key, for testing. Expires; see
+    /// `StateSource.manualTest`.
+    public let forcedState: AgentState?
     public let receivedAt: Date
 
     /// Zero-based index, validated against the real slot count. A request naming
@@ -33,6 +36,24 @@ public struct ConnectRequest: Sendable, Equatable {
     public func slotIndex(slotCount: Int) -> Int? {
         guard let requestedSlot, requestedSlot >= 1, requestedSlot <= slotCount else { return nil }
         return requestedSlot - 1
+    }
+
+    /// Colour words as well as state names, because "green" is what someone types
+    /// when testing and `complete` is what the model calls it. The words follow the
+    /// reference device's own legend: idle white, thinking blue, complete green,
+    /// needs input amber, error red.
+    public static func state(named text: String) -> AgentState? {
+        let key = text.lowercased().trimmingCharacters(in: .whitespacesAndNewlines)
+        switch key {
+        case "white", "grey", "gray", "idle": return .idle
+        case "blue", "running", "thinking", "working": return .running
+        case "green", "complete", "done", "finished": return .complete
+        case "amber", "yellow", "orange", "needsinput", "needs-input", "waiting": return .needsInput
+        case "red", "error", "failed", "failure": return .error
+        case "hatched", "unknown", "lost": return .unknown
+        case "empty", "off", "unassigned", "clear": return .unassigned
+        default: return AgentState(rawValue: key)
+        }
     }
 
     public static let defaultDirectory = ClaudeHookInstaller.supportDirectory
@@ -53,6 +74,7 @@ public struct ConnectRequest: Sendable, Equatable {
             cwd: root["cwd"]?.stringValue,
             requestedSlot: root["slot"]?.intValue,
             surfaceID: root["surface_id"]?.stringValue,
+            forcedState: root["state"]?.stringValue.flatMap(state(named:)),
             receivedAt: receivedAt
         )
     }
@@ -128,6 +150,34 @@ public struct ConnectRequest: Sendable, Equatable {
             check("malformed request \(bad.isEmpty ? "<empty>" : bad) produced a request",
                   parse(Data(bad.utf8), receivedAt: now) == nil)
         }
+
+        // Colour words and state names both resolve, and the mapping follows the
+        // reference legend rather than being invented per call site.
+        let expected: [(String, AgentState)] = [
+            ("green", .complete), ("GREEN", .complete), ("complete", .complete),
+            ("blue", .running), ("thinking", .running), ("running", .running),
+            ("amber", .needsInput), ("yellow", .needsInput), ("needsInput", .needsInput),
+            ("red", .error), ("error", .error),
+            ("white", .idle), ("idle", .idle),
+            ("unknown", .unknown), ("hatched", .unknown),
+            ("empty", .unassigned),
+        ]
+        for (word, want) in expected {
+            check("\(word) did not resolve to \(want.rawValue), got \(state(named: word)?.rawValue ?? "nil")",
+                  state(named: word) == want)
+        }
+        check("a nonsense colour resolved to something", state(named: "octarine") == nil)
+        check("every state is reachable by its own raw value",
+              AgentState.allCases.allSatisfy { state(named: $0.rawValue) == $0 })
+        check("a forced state did not parse from a request",
+              parse(Data(#"{"session_id":"a","state":"green"}"#.utf8), receivedAt: now)?
+                  .forcedState == .complete)
+        check("a request with no state forced one",
+              parse(Data(#"{"session_id":"a"}"#.utf8), receivedAt: now)?.forcedState == nil)
+        // The expiry is what stops a test leaving a key lying for good.
+        check("the manual test source does not expire",
+              StateSource.manualTest.stalenessThreshold > 0
+                  && StateSource.manualTest.stalenessThreshold <= 120)
 
         // Drain: mtime order, files consumed, non-json ignored.
         let scratch = FileManager.default.temporaryDirectory

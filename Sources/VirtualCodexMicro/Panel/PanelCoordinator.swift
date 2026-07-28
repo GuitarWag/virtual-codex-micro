@@ -124,6 +124,7 @@ final class PanelCoordinator: ObservableObject {
         // which the engine does deliberately and logs, but silently as far as the
         // panel is concerned.
         engine.register(.cmuxEvents)
+        engine.register(.manualTest)
         engine.register(Self.mockSource)
 
         // Strays from a previous crash, before anything else spawns.
@@ -376,7 +377,17 @@ final class PanelCoordinator: ObservableObject {
             _ = registry.bind(discovered, to: slot, engine: &engine, at: Date())
             log.record(ActivityEntry(at: Date(), slot: slot, sessionID: request.sessionID,
                                      event: .note("connected to key \(slot + 1) on request")))
-            note("key \(slot + 1) connected")
+
+            if let forced = request.forcedState {
+                // Recorded through the engine like any other source, not painted onto
+                // the view. That way it obeys the same arbitration and the same
+                // expiry, and a forced colour cannot outlive its welcome or mask a
+                // real state permanently — which a direct view override would.
+                record(forced, for: request.sessionID, from: .manualTest)
+                note("key \(slot + 1) forced \(forced.label)")
+            } else {
+                note("key \(slot + 1) connected")
+            }
         }
     }
 

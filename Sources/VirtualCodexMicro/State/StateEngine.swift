@@ -58,6 +58,20 @@ public struct StateSource: Sendable, Identifiable, Equatable {
     /// needs — so 15s is seven missed ticks. A hook source that stops re-affirming
     /// loses its vote by design: an `idle` from a receiver that died is exactly the
     /// stale colour this engine exists to prevent.
+    /// A colour forced by hand, for testing integrations.
+    ///
+    /// `.reported` so it outranks transcript inference and actually shows, and every
+    /// state reportable because forcing any of them is the point. The 45s expiry is
+    /// the important part: a test that leaves a key permanently lying is worse than
+    /// no test, so the override decays and the real sources take back over without
+    /// anyone having to remember to undo it.
+    public static let manualTest = StateSource(
+        id: "manual.test",
+        confidence: .reported,
+        reportableStates: Set(AgentState.allCases),
+        stalenessThreshold: 45
+    )
+
     public static let claudeHooks = StateSource(
         id: "claude.hooks",
         confidence: .reported,
