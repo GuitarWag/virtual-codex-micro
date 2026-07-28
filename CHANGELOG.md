@@ -18,6 +18,10 @@ right now.
   etc.) superseded by each spike's `FINDINGS.md`. The scripts that produced them stay.
 - Four third-party reference photographs of the physical Codex Micro hardware from `docs/` —
   not this project's to redistribute.
+- The raw probe scripts under `spikes/` (~25 files: python/shell/AppleScript/Swift), once their
+  `FINDINGS.md` already stated the load-bearing numbers. Kept the four files shipped code cites as
+  ported verbatim from: `spikes/focus/host-for-pid.sh`, `raise-terminal.applescript`,
+  `raise-iterm.applescript`, and `spikes/tailing/watch.py`.
 
 ## [0.1.0] - 2026-07-28
 

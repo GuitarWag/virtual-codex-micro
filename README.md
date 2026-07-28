@@ -279,10 +279,14 @@ PLAN.md       feasibility verdict and milestones
 CHANGELOG.md  what shipped, release to release
 ```
 
-`spikes/` is kept deliberately. Several load-bearing decisions rest on measurements
-taken there — that `PermissionRequest` fires in ~1ms while `Notification` is debounced
+`spikes/` is kept deliberately, trimmed to what's still load-bearing: each experiment's
+`FINDINGS.md` — that `PermissionRequest` fires in ~1ms while `Notification` is debounced
 by 6s, that `turn_duration` is the only reliable turn boundary, that `forkpty` works
-where `openpty` plus `Process` does not.
+where `openpty` plus `Process` does not — plus the handful of scripts shipped code was
+ported from verbatim (`FocusResolver.swift`'s AppleScript, `ClaudeTranscriptSource.swift`'s
+detection rules). The raw probe scripts that produced each finding were removed once the
+number was written down; they weren't reusable outside the machine and session they ran
+against.
 
 ## Design notes
 
