@@ -6,6 +6,13 @@ right now.
 
 ## [Unreleased]
 
+### Added
+
+- `Skills/v-micro-connect/`: the `/v-micro-connect` Claude Code skill, previously present only
+  on the author's machine (`~/.claude/skills/`). README now documents installing it from the
+  repo — without it, "Connecting a session by hand" was undocumented dead air for anyone who
+  didn't already have it.
+
 ### Removed
 
 - Local machine/session data that had been committed by accident: a `.claude` scratch config

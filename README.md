@@ -197,7 +197,11 @@ wrong.
 
 Discovery has holes: a bare `claude` names no session id, a brand-new cmux session
 has no resume checkpoint yet, an idle session emits nothing. A session always knows
-its own identity, so it can say so:
+its own identity, so it can say so — via a Claude Code skill, installed once:
+
+```sh
+mkdir -p ~/.claude/skills && cp -r Skills/v-micro-connect ~/.claude/skills/
+```
 
 ```
 /v-micro-connect          # take the first free key
@@ -205,9 +209,8 @@ its own identity, so it can say so:
 /v-micro-connect green    # force a colour, for testing — reverts after 45s
 ```
 
-The skill lives in `~/.claude/skills/v-micro-connect/`. A forced colour proves the
-panel renders and the halo follows; it proves nothing about whether a real integration
-works.
+A forced colour proves the panel renders and the halo follows; it proves nothing about
+whether a real integration works.
 
 ## What it cannot do
 
@@ -275,6 +278,7 @@ Sources/VirtualCodexMicro/
 docs/
   demo/       the clips above
 spikes/       five feasibility spikes, each with a FINDINGS.md
+Skills/       the /v-micro-connect Claude Code skill — see Connecting a session by hand
 PLAN.md       feasibility verdict and milestones
 CHANGELOG.md  what shipped, release to release
 ```
