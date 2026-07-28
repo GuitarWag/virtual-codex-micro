@@ -29,6 +29,19 @@ public struct SessionCapabilities: OptionSet, Sendable, Codable {
 public enum StateConfidence: Int, Comparable, Sendable, Codable {
     case inferred
     case reported
+    /// A human said so, for a bounded window.
+    ///
+    /// Above `reported` because a forced colour that live sources can overwrite is
+    /// useless exactly where it is wanted: forcing a state on the session that is
+    /// doing the work fails within milliseconds, since its own tool calls emit
+    /// fresher `reported` readings and arbitration breaks ties on evidence time.
+    /// Observed — three attempts to force green on an active session all lost to the
+    /// next PreToolUse.
+    ///
+    /// Safe only because it expires. See `StateSource.manualTest`, whose 45s
+    /// threshold is asserted precisely so this tier cannot make the panel lie
+    /// indefinitely.
+    case forced
 
     public static func < (a: StateConfidence, b: StateConfidence) -> Bool { a.rawValue < b.rawValue }
 }

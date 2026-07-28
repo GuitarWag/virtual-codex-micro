@@ -186,6 +186,7 @@ public struct ActivityEntry: Identifiable, Sendable, Equatable {
         switch confidence {
         case .inferred: "inferred"
         case .reported: "reported"
+        case .forced: "forced by hand"
         }
     }
 

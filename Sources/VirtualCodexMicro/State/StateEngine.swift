@@ -67,7 +67,7 @@ public struct StateSource: Sendable, Identifiable, Equatable {
     /// anyone having to remember to undo it.
     public static let manualTest = StateSource(
         id: "manual.test",
-        confidence: .reported,
+        confidence: .forced,
         reportableStates: Set(AgentState.allCases),
         stalenessThreshold: 45
     )

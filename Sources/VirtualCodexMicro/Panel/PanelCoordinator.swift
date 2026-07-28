@@ -67,13 +67,25 @@ final class PanelCoordinator: ObservableObject {
     /// one stale `error` pinned the case red and every later change was invisible.
     var glowState: AgentState? {
         if let demoGlow { return demoGlow }
-        let selected = state(at: selectedSlot)
-        if selected != .unassigned { return selected }
-        return latestReceivedState
+        // An explicit selection pins the ring to that key. Otherwise it follows the
+        // most recent change anywhere, which is the point of a peripheral signal:
+        // something moved, look here.
+        if let selectedSlot {
+            let selected = state(at: selectedSlot)
+            if selected != .unassigned { return selected }
+        }
+        guard let lastChangedSlot else { return nil }
+        let latest = state(at: lastChangedSlot)
+        return latest == .unassigned ? nil : latest
     }
 
-    /// The most recent state a source actually reported, regardless of slot.
-    private(set) var latestReceivedState: AgentState?
+    /// The slot whose RESOLVED state changed most recently.
+    ///
+    /// Not "the last reading recorded", which is what this used to track and which is
+    /// wrong: a reading that loses arbitration still gets recorded, so a forced
+    /// `complete` that won on its key was painted over on the ring by a `running`
+    /// that lost. The ring must show a colour some key is actually wearing.
+    private(set) var lastChangedSlot: Int?
 
     /// The last action's outcome, for brief on-panel feedback.
     ///
@@ -105,7 +117,18 @@ final class PanelCoordinator: ObservableObject {
     /// made it the command target. Pressing accept would have acted on slot 0
     /// whatever you had just clicked — on an approval dialog, the worst available
     /// class of bug. Defaults to slot 0 so the cluster is never targetless.
-    @Published private(set) var selectedSlot: Int = 0
+    /// `nil` until the user actually clicks a key.
+    ///
+    /// It defaulted to 0, and that silently broke the ring: the glow asks for the
+    /// selected key's state and only falls back to the latest change when the
+    /// selection has nothing to show. With a default of 0 there was always a
+    /// selection, so the fallback could never fire and the ring showed key 1
+    /// forever — grey, while another key went green.
+    @Published private(set) var selectedSlot: Int?
+
+    /// What the command cluster and dial act on. Falls back to key 1 so the cluster
+    /// is never targetless, which is a different question from what the ring shows.
+    var commandTarget: Int { selectedSlot ?? 0 }
 
     func select(_ slot: Int) {
         guard (0 ..< PanelLayout.agentKeyCount).contains(slot) else { return }
@@ -526,7 +549,6 @@ final class PanelCoordinator: ObservableObject {
         guard case .accepted = engine.record(state, for: sessionID, from: source.id, observedAt: now)
         else { return }
         guard before != state else { return }
-        latestReceivedState = state
         log.record(ActivityEntry(
             at: now,
             slot: slot(for: sessionID),
@@ -546,9 +568,62 @@ final class PanelCoordinator: ObservableObject {
         for slot in 0 ..< PanelLayout.agentKeyCount {
             next[slot] = registry.resolve(slot: slot, engine: engine, at: now)
         }
+        for slot in 0 ..< PanelLayout.agentKeyCount {
+            let was = resolutions[slot]?.state
+            let now = next[slot]?.state
+            if let now, now != was, now != .unassigned { lastChangedSlot = slot }
+        }
         resolutions = next
         unbound = registry.unbound(from: discovered)
         activity = log.entries(limit: 32)
+        publishStatus(next)
+    }
+
+    /// Mirror the resolved state to disk so it can be inspected without the GUI.
+    ///
+    /// This exists because of a repeated failure, not for tidiness. Every state the
+    /// panel holds lives in memory — resolutions, the activity log, the engine's
+    /// readings — so from outside the process there was no way to answer "what colour
+    /// does it think key 3 is, and which source won". Four rounds of debugging a
+    /// forced colour were spent inferring that from behaviour, and the same blind
+    /// spot produced a render check that measured the wrong image and a probe that
+    /// contradicted the app.
+    ///
+    /// Written only when the summary changes, so a 200ms poll does not churn the
+    /// disk, and written atomically so a reader never sees half a file.
+    private var lastStatusSummary = ""
+
+    private func publishStatus(_ resolved: [Int: Resolution]) {
+        var lines: [String] = []
+        for slot in 0 ..< PanelLayout.agentKeyCount {
+            let binding = registry.binding(at: slot)
+            let resolution = resolved[slot]
+            let source = resolution?.reason ?? "-"
+            lines.append([
+                "key \(slot + 1)",
+                binding?.title ?? "empty",
+                resolution?.state.rawValue ?? "unassigned",
+                (resolution?.confidence).map { "\($0)" } ?? "-",
+                source,
+            ].joined(separator: "\t"))
+        }
+        lines.append([
+            "RING",
+            selectedSlot.map { "pinned to key \($0 + 1)" }
+                ?? lastChangedSlot.map { "following key \($0 + 1)" }
+                ?? "nothing has changed yet",
+            glowState?.rawValue ?? "dark",
+            "-", "-",
+        ].joined(separator: "\t"))
+        let summary = lines.joined(separator: "\n") + "\n"
+        guard summary != lastStatusSummary else { return }
+        lastStatusSummary = summary
+
+        let url = ClaudeHookInstaller.supportDirectory.appendingPathComponent("status.tsv")
+        try? FileManager.default.createDirectory(
+            at: ClaudeHookInstaller.supportDirectory, withIntermediateDirectories: true
+        )
+        try? Data(summary.utf8).write(to: url, options: .atomic)
     }
 
     // MARK: - Drift
@@ -600,7 +675,7 @@ final class PanelCoordinator: ObservableObject {
     /// Capabilities of the SELECTED session, so the cluster shows what the keys
     /// would actually do to the session you picked.
     var focusedCapabilities: SessionCapabilities? {
-        capabilities(at: selectedSlot)
+        capabilities(at: commandTarget)
     }
 
     // MARK: - Actions
@@ -646,7 +721,7 @@ final class PanelCoordinator: ObservableObject {
     }
 
     func dispatch(_ slot: PanelLayout.CommandSlot) {
-        let target = selectedSlot
+        let target = commandTarget
         guard let binding = registry.binding(at: target) else {
             log.record(ActivityEntry(at: Date(), event: .note(
                 "\(slot.rawValue): nothing bound to act on")))

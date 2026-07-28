@@ -125,6 +125,11 @@ public struct SessionPopover: View {
             "A hook pushed this at the moment it happened, so \"\(state.label)\" is witnessed."
         case .inferred:
             "This was read off the transcript on disk rather than pushed by the session, so \"\(state.label)\" is probable, not witnessed."
+        case .forced:
+            // Said plainly, because a forced colour is the one reading that is not
+            // evidence of anything. A user looking at the popover to work out why a
+            // key is a colour deserves to be told it was set by hand.
+            "This was forced by hand for testing, so \"\(state.label)\" reflects nothing about the session. It reverts shortly."
         }
     }
 
