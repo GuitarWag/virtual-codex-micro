@@ -31,8 +31,28 @@ amber; the ✓ and ✕ keys approve or reject it. This works for sessions runnin
 cmux, which exposes a socket API for sending keys to a specific surface. For sessions
 in a plain terminal it does not — see [What it cannot do](#what-it-cannot-do).
 
-**Brings a session forward.** Click a key and its window comes to the front, whether
-that is a cmux surface or an iTerm2 tab.
+**Brings a session forward.** Click a key and the app hosting that session comes to
+the front. This is not a list of supported terminals — the resolver walks the
+process's ancestry until it finds the owning `.app`, so a session running in a
+JetBrains IDE terminal, VS Code, or anything else works without knowing about it.
+
+How precisely it lands depends on the host. A cmux session is focused through cmux's
+own socket API (`rpc surface.focus`), which addresses an exact surface. Everything
+else goes through process-ancestry resolution, in three tiers:
+
+| | Hosts | Result |
+|---|---|---|
+| **Tier 1** | Terminal, iTerm2 | the exact window *and* tab |
+| **Tier 2** | GoLand, VS Code, Zed, cmux.app, everything else | the app comes forward, but **not a specific tab** |
+| **Tier 3** | detached tmux | nothing to raise; you get an offer to attach |
+
+Tier 1 is short because it holds only hosts whose tty→window scripting was actually
+tested. An untested emulator is classified Tier 2 rather than assumed: raising the
+wrong tab confidently is worse than admitting the limit, since the point of clicking a
+key is to be told where the session is.
+
+The panel says which it did — `Raises GoLand — cannot target the tab` — rather than
+reporting a generic success.
 
 **Notices sessions on its own.** A session started before the app, started as a bare
 `claude` with no flags, or opened after launch all get picked up and bound to a free
