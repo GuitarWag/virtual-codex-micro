@@ -46,6 +46,37 @@ key without being told.
 - **cmux**, optional. Without it you get colour and focus; with it you also get
   approve and reject.
 
+## Install
+
+`./Scripts/package.sh` produces a universal (Apple Silicon + Intel) DMG, about
+3.5 MB, ad-hoc signed.
+
+**Ad-hoc signed means macOS will refuse to open it.** `spctl --assess` on the
+result reports `rejected`, and that is the correct verdict — the app carries no
+Developer ID, so the system cannot tell you who wrote it. On macOS 15 and later,
+right-click → Open no longer bypasses this. The one route is:
+
+1. Open the DMG, drag the app to Applications, launch it once and let it be blocked.
+2. **System Settings → Privacy & Security**, scroll to the message about
+   VirtualCodexMicro, click **Open Anyway**.
+3. Grant Accessibility and Automation when asked — clicking a key raises another
+   app's window, and macOS will not allow that silently.
+
+That is a genuine security warning and not a formality. What you can check for
+yourself before dismissing it:
+
+- **No network code.** No `URLSession`, no sockets, nothing outbound. Session state,
+  transcripts and the activity log never leave the machine.
+- **It spawns exactly four external binaries**: `/bin/ps` (find sessions), `/bin/sh`
+  (the hook forwarder), `/usr/bin/osascript` (raise a window) and `/usr/bin/tmux`.
+- **It reads** `~/.claude/projects/*.jsonl` (your transcripts, locally) and **writes**
+  `~/.claude/settings.json` only when you explicitly install hooks, backing it up
+  first.
+
+Fixing the warning properly needs a Developer ID Application certificate and a paid
+Apple Developer account; `notarytool` itself is already present in Command Line
+Tools. Until then, building from source below avoids the whole issue.
+
 ## Build and run
 
 ```sh
@@ -173,8 +204,8 @@ indistinguishable from outside, so both abstain rather than one being guessed at
 
 **Codex.** The backend protocol was built for two providers and only one exists.
 
-**Ship anywhere.** Notarisation needs Xcode, which this machine does not have, so
-`Scripts/package.sh` builds an unnotarised DMG.
+**Be installed without a Gatekeeper warning.** The DMG is ad-hoc signed, not
+notarised — see [Install](#install).
 
 ### Known fault
 

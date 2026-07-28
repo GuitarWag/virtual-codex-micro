@@ -10,7 +10,17 @@ ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 APP="$ROOT/.build/VirtualCodexMicro.app"
 BIN="$ROOT/.build/$CONFIG/VirtualCodexMicro"
 
-[ -x "$BIN" ] || { echo "missing $BIN — run: swift build -c $CONFIG" >&2; exit 1; }
+if [ ! -x "$BIN" ]; then
+    # `universal` is not a SwiftPM configuration — package.sh lipos the two release
+    # slices into place. Saying "swift build -c universal" here would send someone
+    # after a flag that does not exist.
+    if [ "$CONFIG" = "universal" ]; then
+        echo "missing $BIN — run: ./Scripts/package.sh" >&2
+    else
+        echo "missing $BIN — run: swift build -c $CONFIG" >&2
+    fi
+    exit 1
+fi
 
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"

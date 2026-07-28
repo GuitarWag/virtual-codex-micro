@@ -256,13 +256,13 @@ rediscovering it later.
 | `xcodebuild`, `.xcodeproj` | no | SwiftPM package, `swift build` |
 | Asset catalog for colours (`actool`) | no | Colours defined in Swift with dynamic light/dark resolution |
 | `XCTest` / `swift-testing` | neither | Assert-based `SelfCheck`, run via `VCM_SELFTEST=1` |
-| `notarytool`, `stapler` | no | Ad-hoc signing for dev; notarization needs Xcode installed |
+| `notarytool`, `stapler` | **yes** | Both ship with Command Line Tools. Notarization is blocked by having no Developer ID certificate (`security find-identity` reports zero), not by Xcode — an earlier row here said Xcode and was wrong |
 | SwiftUI, AppKit, `NSPanel` | yes | Confirmed compiling and launching |
 
 Two of these are genuinely fine — a SwiftPM package with zero dependencies is a better fit for this
 app than an Xcode project, and code-defined colours are more testable than a catalog, since the
 contrast ratios can be asserted rather than trusted. The other two are real gaps: no test framework
-means invariants live in a hand-rolled self-check, and notarization in M4 is blocked until Xcode is
+means invariants live in a hand-rolled self-check, and notarization in M4 is blocked until a Developer ID certificate is
 installed.
 
 One thing the bundling script exists for, non-obviously: TCC (Accessibility, Automation) and Carbon
