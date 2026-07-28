@@ -1,6 +1,6 @@
 # Virtual Codex Micro — Feasibility Review & Delivery Plan
 
-Reviewed against `virtual-codex-micro-prd.md`, 2026-07-26.
+Reviewed against the original product requirements doc, 2026-07-26.
 
 ## Verdict
 
@@ -270,9 +270,9 @@ hotkey registration both identify an app by bundle identity. A bare SwiftPM exec
 either grant, and the permission would be re-prompted or silently denied. So `Scripts/bundle.sh`
 wraps the binary in an ad-hoc signed `.app` — needed from M1 for the global hotkey, not at ship time.
 
-The `tasks` CLI is also absent and has no discoverable installer, so `Scripts/task.py` is a ~90-line
-stand-in that reads and writes `tasks.md` in the identical format. Installing the real CLI later is a
-drop-in replacement.
+The `tasks` CLI is also absent and has no discoverable installer, so a small script stood in for it —
+a stand-in that read and wrote a task board in the identical format. Removed once the board was clear;
+see CHANGELOG.md for what shipped.
 
 ## Distribution constraint
 
@@ -306,5 +306,6 @@ spends three weeks on chrome.
 
 ## Task board
 
-See `tasks.md` — 33 active tasks plus 3 blocked, tagged by milestone (`m0`…`m4`, `deferred`) and area
-(`spike`, `panel`, `ui`, `state`, `backend`, `a11y`, `config`, `ship`).
+Tracked in a `tasks.md` board during active development — 33 active tasks plus 3 blocked, tagged by
+milestone (`m0`…`m4`, `deferred`) and area (`spike`, `panel`, `ui`, `state`, `backend`, `a11y`,
+`config`, `ship`). Removed once the board was clear; see CHANGELOG.md for what shipped.

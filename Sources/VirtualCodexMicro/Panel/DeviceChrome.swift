@@ -9,8 +9,8 @@ import SwiftUI
 /// An earlier version of the panel put the state colour inside each key and left
 /// the case a static frosted rectangle. That is backwards. A lit key is only
 /// information once you are already looking at the panel, and if you are already
-/// looking at the panel you could have read the label. The reference photographs
-/// (`docs/Codex-Micro-switch-options-RGB-Colors-*.jpg`) show what the hardware
+/// looking at the panel you could have read the label. Reference photographs of the
+/// hardware, consulted during design and not redistributed here, show what it
 /// actually does: the whole case washes in one colour and spills light past its
 /// own outline onto the desk. That is peripheral, which is the only kind of
 /// signal that works when your eyes are on your editor.

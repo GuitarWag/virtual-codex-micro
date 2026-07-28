@@ -274,10 +274,9 @@ Sources/VirtualCodexMicro/
   Support/    layout maths, colour palettes, shared types
 docs/
   demo/       the clips above
-  M1-REVIEW.md
 spikes/       five feasibility spikes, each with a FINDINGS.md
 PLAN.md       feasibility verdict and milestones
-tasks.md      the board
+CHANGELOG.md  what shipped, release to release
 ```
 
 `spikes/` is kept deliberately. Several load-bearing decisions rest on measurements
