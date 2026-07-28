@@ -366,7 +366,19 @@ final class PanelCoordinator: ObservableObject {
             let discovered = DiscoveredSession(session: session, pid: request.pid)
             known[request.sessionID] = discovered
 
+            // Precedence: the key the user named, else the key this session is
+            // already on, else the first free one.
+            //
+            // The middle term was missing, and it made a colour test move the
+            // session: `/v-micro-connect green` names no slot, so a session sitting
+             // happily on key 4 was rebound to the first free key. Testing a colour
+            // must not relocate anything — the panel's whole promise is that a key
+            // keeps meaning the same session.
+            let alreadyOn = (0 ..< PanelLayout.agentKeyCount).first {
+                registry.binding(at: $0)?.sessionID == request.sessionID
+            }
             let target = request.slotIndex(slotCount: PanelLayout.agentKeyCount)
+                ?? alreadyOn
                 ?? (0 ..< PanelLayout.agentKeyCount).first { registry.binding(at: $0) == nil }
 
             guard let slot = target else {
