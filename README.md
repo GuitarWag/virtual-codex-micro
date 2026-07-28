@@ -83,6 +83,13 @@ right-click → Open no longer bypasses this. The one route is:
 3. Grant Accessibility and Automation when asked — clicking a key raises another
    app's window, and macOS will not allow that silently.
 
+On a managed Mac (MDM-enrolled, e.g. a work machine), step 2 may not be offered to
+you at all — that's a policy decision made above the Privacy & Security pane, not
+something this app or its DMG can work around. Building from source sidesteps it
+entirely: a binary you build and run locally never gets the quarantine flag a
+downloaded file does, so Gatekeeper has nothing to block. See
+[Build and run](#build-and-run) below.
+
 That is a genuine security warning and not a formality. What you can check for
 yourself before dismissing it:
 
@@ -116,6 +123,27 @@ swift build -c release && ./Scripts/bundle.sh release
 `bundle.sh` exists because a bare executable has no stable identity for macOS
 privacy permissions, so a signed bundle is required before the system will remember a
 granted permission. It ad-hoc signs, which is enough locally.
+
+### A shortcut for reopening it
+
+If you're building from source every time (managed Mac, no `Open Anyway`), a shell
+function beats retyping the three lines above. Add this to `~/.zshrc`, with `repo`
+pointed at wherever you cloned this:
+
+```sh
+vcm() {
+  local repo=~/path/to/codex-micro
+  local app="$repo/.build/VirtualCodexMicro.app"
+  if [[ "$1" == "--build" || ! -d "$app" ]]; then
+    (cd "$repo" && swift build -c release && ./Scripts/bundle.sh release) || return 1
+  fi
+  open "$app"
+}
+```
+
+`vcm` opens the app, building it first only if it isn't there yet. `vcm --build`
+forces a rebuild — run that after pulling new commits, since the function otherwise
+has no way to know the source changed underneath an already-built `.app`.
 
 The app has no Dock icon or main window (`LSUIElement`). It lives in the menu bar.
 

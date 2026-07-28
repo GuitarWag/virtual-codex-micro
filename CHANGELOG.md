@@ -12,6 +12,9 @@ right now.
   on the author's machine (`~/.claude/skills/`). README now documents installing it from the
   repo — without it, "Connecting a session by hand" was undocumented dead air for anyone who
   didn't already have it.
+- README: a `vcm` zsh function for rebuilding-and-opening the app from source, and a note that
+  managed (MDM) Macs may never offer Gatekeeper's "Open Anyway" at all — building from source
+  sidesteps that instead of waiting on it.
 
 ### Removed
 
