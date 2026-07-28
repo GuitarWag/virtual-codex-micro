@@ -48,8 +48,9 @@ key without being told.
 
 ## Install
 
-`./Scripts/package.sh` produces a universal (Apple Silicon + Intel) DMG, about
-3.5 MB, ad-hoc signed.
+**[Download the latest DMG](https://github.com/GuitarWag/virtual-codex-micro/releases/latest)**
+— universal (Apple Silicon + Intel), 3.5 MB. Or build it yourself with
+`./Scripts/package.sh`.
 
 **Ad-hoc signed means macOS will refuse to open it.** `spctl --assess` on the
 result reports `rejected`, and that is the correct verdict — the app carries no
