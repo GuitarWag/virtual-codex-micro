@@ -150,6 +150,15 @@ final class PanelCoordinator: ObservableObject {
 
     private var known: [String: DiscoveredSession] = [:]
     private var knownPIDs: [String: Int32?] = [:]
+    /// Pids learned from hook events via `CLAUDE_PID`.
+    ///
+    /// The argv join cannot see a bare `claude`: it looks for `--session-id` or
+    /// `--resume`, and a session started as plain `claude` has neither. Observed
+    /// live — an iTerm session on ttys011, plainly alive, reported by the tailer as
+    /// "no live process carries this session id", so its state resolved to `unknown`
+    /// and its key stayed grey while focus worked fine. A hook payload carries the
+    /// pid directly, so this closes the hole for any launch style.
+    private var hookPIDs: [String: Int32] = [:]
     private var demoStates: [Int: AgentState]?
     private var demoSessions: [Int: AgentSession] = [:]
     private var demoCapabilities: SessionCapabilities = .observed
@@ -208,10 +217,21 @@ final class PanelCoordinator: ObservableObject {
 
     /// Cold start from disk, then follow both live channels.
     private func runLive() async {
+        // Seed liveness from what the registry already persisted. A hook-learned pid
+        // is only re-learned when the session next emits an event, and an idle
+        // session emits nothing — so without this, a bare `claude` that was alive
+        // when last bound reads as dead until it happens to do something. The pid is
+        // still checked with `kill(pid, 0)` before use, so a stale one from a
+        // previous run cannot resurrect a key.
+        for binding in registry.bindings.compactMap({ $0 }) {
+            if let pid = binding.pid { hookPIDs[binding.sessionID] = pid }
+        }
+
         // Tailing first and on its own: at launch there are no hook events to
         // catch up on, so this is the only way six keys can mean anything before
         // the next transition happens.
         await pollCmux()
+        applyConnectRequests()
         pollTranscripts()
         autobindFreeSlots()
         refresh(discovered: discoveredSessions)
@@ -242,6 +262,10 @@ final class PanelCoordinator: ObservableObject {
     /// log, because "we received it and chose not to act" is exactly what the
     /// activity strip exists to show.
     private func apply(_ event: HookEvent) {
+        if let pid = event.claudePID {
+            hookPIDs[event.sessionID] = pid
+            if knownPIDs[event.sessionID] == nil { knownPIDs[event.sessionID] = pid }
+        }
         switch event.outcome {
         case .state(let state):
             record(state, for: event.sessionID, from: .claudeHooks)
@@ -311,13 +335,69 @@ final class PanelCoordinator: ObservableObject {
         while !Task.isCancelled {
             try? await Task.sleep(for: .seconds(4))
             await pollCmux()
+            applyConnectRequests()
             autobindFreeSlots()
             refresh(discovered: discoveredSessions)
         }
     }
 
+    /// Honour sessions that asked to be connected from inside themselves.
+    ///
+    /// This is the only path where the session's identity is a fact rather than an
+    /// inference, so it takes precedence: an explicit request binds even when
+    /// discovery has never seen the session and cannot resolve a surface for it.
+    /// It is also the only way to say WHICH key — a preference no discovery can
+    /// deduce.
+    private func applyConnectRequests() {
+        for request in ConnectRequest.drain() {
+            // Trust the request for identity, but keep whatever richer record
+            // discovery may already hold: it may know a surface UUID, which is what
+            // focus and send need and what the request cannot supply.
+            let session = known[request.sessionID]?.session ?? AgentSession(
+                id: request.sessionID,
+                backendID: "claude",
+                title: request.cwd.map { URL(filePath: $0).lastPathComponent } ?? "session",
+                repoPath: request.cwd,
+                state: .unknown,
+                confidence: .inferred,
+                capabilities: .observed
+            )
+            let discovered = DiscoveredSession(session: session, pid: request.pid)
+            known[request.sessionID] = discovered
+
+            let target = request.slotIndex(slotCount: PanelLayout.agentKeyCount)
+                ?? (0 ..< PanelLayout.agentKeyCount).first { registry.binding(at: $0) == nil }
+
+            guard let slot = target else {
+                log.record(ActivityEntry(at: Date(), sessionID: request.sessionID,
+                                         event: .note("connect refused: every key is taken")))
+                continue
+            }
+            _ = registry.bind(discovered, to: slot, engine: &engine, at: Date())
+            log.record(ActivityEntry(at: Date(), slot: slot, sessionID: request.sessionID,
+                                     event: .note("connected to key \(slot + 1) on request")))
+            note("key \(slot + 1) connected")
+        }
+    }
+
     private func pollTranscripts() {
-        ingest(transcripts.poll(now: Date(), liveSessions: ClaudeTranscriptSource.liveSessions()))
+        ingest(transcripts.poll(now: Date(), liveSessions: liveSessionMap()))
+    }
+
+    /// Liveness from both sources, argv and hooks.
+    ///
+    /// The tailer gates `idle`/`complete` on a session having a live process, which
+    /// is right — without it, idle and crashed are the same colour. But its only
+    /// evidence was argv, so a bare `claude` was indistinguishable from a dead one.
+    /// A pid we learned from a hook is checked with `kill(pid, 0)` rather than
+    /// trusted: the session may have exited since the event, and a stale pid would
+    /// resurrect a dead key.
+    private func liveSessionMap() -> [String: Int32] {
+        var map = ClaudeTranscriptSource.liveSessions()
+        for (id, pid) in hookPIDs where map[id] == nil {
+            if PTYChild.isAlive(pid) { map[id] = pid }
+        }
+        return map
     }
 
     private func ingest(_ readings: [ClaudeTranscriptSource.Reading]) {

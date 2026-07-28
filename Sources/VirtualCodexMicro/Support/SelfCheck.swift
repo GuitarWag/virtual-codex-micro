@@ -64,6 +64,7 @@ enum SelfCheck {
         failures += OnboardingView.selfCheckFailures().map { "onboarding: \($0)" }
         failures += OwnedSession.selfCheckFailures().map { "owned: \($0)" }
         failures += CmuxAdapter.selfCheckFailures().map { "cmux: \($0)" }
+        failures += ConnectRequest.selfCheckFailures().map { "connect: \($0)" }
         failures += DeviceChrome.selfCheckFailures().map { "chrome: \($0)" }
         failures += MenuBarItem.selfCheckFailures().map { "menubar: \($0)" }
 

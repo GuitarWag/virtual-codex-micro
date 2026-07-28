@@ -154,7 +154,17 @@ if let pidText = ProcessInfo.processInfo.environment["VCM_FOCUS"], let pid = Int
 }
 
 if ProcessInfo.processInfo.environment["VCM_PROBE"] != nil {
-    let live = ClaudeTranscriptSource.liveSessions()
+    // Same union the coordinator uses, or the probe reports a different reality
+    // than the app: argv alone cannot see a bare `claude`, and reading persisted
+    // pids is what closes that. A diagnostic that disagrees with the thing it is
+    // diagnosing is worse than no diagnostic.
+    var live = ClaudeTranscriptSource.liveSessions()
+    let persisted = SessionRegistry()
+    for binding in persisted.bindings.compactMap({ $0 }) {
+        if let pid = binding.pid, live[binding.sessionID] == nil, PTYChild.isAlive(pid) {
+            live[binding.sessionID] = pid
+        }
+    }
     var source = ClaudeTranscriptSource()
     let readings = source.poll(now: Date(), liveSessions: live)
 
