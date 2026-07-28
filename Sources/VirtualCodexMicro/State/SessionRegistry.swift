@@ -93,7 +93,11 @@ public final class MemoryBindingStore: BindingStore, @unchecked Sendable {
 /// is not.
 public struct SlotBinding: Codable, Sendable, Equatable {
     public let sessionID: String
-    public let backendID: String
+    /// Which adapter currently reaches this session, not which agent it is — and so
+    /// `var`: a session first seen by the transcript tailer and later by cmux becomes
+    /// reachable for approve/reject, and the binding has to follow or commands keep
+    /// going to the adapter that cannot act. See `identityDoubt`.
+    public var backendID: String
     public var repoPath: String?
     public var branch: String?
     public var title: String
@@ -140,6 +144,7 @@ public struct SlotBinding: Codable, Sendable, Equatable {
     /// Titles, branches and pids move under a live session. Identity does not.
     func refreshed(from found: DiscoveredSession) -> SlotBinding {
         var copy = self
+        copy.backendID = found.session.backendID
         copy.repoPath = found.session.repoPath
         copy.branch = found.session.branch
         copy.title = found.session.title
@@ -499,9 +504,18 @@ public struct SessionRegistry: Sendable {
     /// identical session id on the same repo, which we accept; adding process
     /// start time would close it if it ever bites.
     static func identityDoubt(_ binding: SlotBinding, _ found: DiscoveredSession) -> String? {
-        if found.session.backendID != binding.backendID {
-            return "backend changed from \(binding.backendID) to \(found.session.backendID)"
-        }
+        // `backendID` deliberately not checked. It once was, and it was wrong: the
+        // field names which adapter can currently reach the session, not which
+        // thread the session is. One Claude session is visible to both the cmux
+        // adapter and the transcript tailer, so the id arrives labelled `cmux` or
+        // `claude` depending on which polled last — and treating that as a change
+        // of identity demanded a rebind for a session that had not moved. Observed
+        // on keys 1 and 3, where the same connect request worked three times and
+        // failed the fourth.
+        //
+        // Ceiling: two providers issuing the same session id would now go unnoticed.
+        // Both use UUIDs and only Claude is implemented, so this is theoretical;
+        // if Codex ever collides, compare provider identity, not the observer.
         if let was = binding.repoPath, let now = found.session.repoPath, was != now {
             return "repo changed from \(was) to \(now), so the id is not the same thread"
         }
@@ -735,6 +749,24 @@ public extension SessionRegistry {
                 SlotBinding(sessionID: "x", backendID: "claude", repoPath: "~/dev/acme", pid: 5, boundAt: t0),
                 session("x", pid: 5)
             ) == nil
+        )
+        // A session seen by a second observer has not moved. Both directions,
+        // because the two writers race and either can be the one that polls last.
+        for (was, now) in [("claude", "cmux"), ("cmux", "claude")] {
+            check(
+                "\(was) -> \(now) was read as a change of identity",
+                SessionRegistry.identityDoubt(
+                    SlotBinding(sessionID: "x", backendID: was, repoPath: "~/dev/acme", pid: 5, boundAt: t0),
+                    session("x", pid: 5, backend: now)
+                ) == nil
+            )
+        }
+        // ...and the binding follows the new observer, or commands keep being sent
+        // to the adapter that cannot act on them.
+        check(
+            "a refreshed binding did not adopt the reaching backend",
+            SlotBinding(sessionID: "x", backendID: "claude", repoPath: "~/dev/acme", pid: 5, boundAt: t0)
+                .refreshed(from: session("x", pid: 5, backend: "cmux")).backendID == "cmux"
         )
 
         // 6. Binding a session that already holds another slot moves it.

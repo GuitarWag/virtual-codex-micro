@@ -43,6 +43,7 @@ enum SelfCheck {
         failures += PanelLayout.selfCheckFailures().map { "layout: \($0)" }
         failures += StateColors.selfCheckFailures().map { "colors: \($0)" }
         failures += PanelController.selfCheckFailures().map { "panel: \($0)" }
+        failures += PanelCoordinator.selfCheckFailures().map { "coordinator: \($0)" }
         failures += HotkeyCenter.selfCheckFailures().map { "hotkey: \($0)" }
         failures += AgentKeyView.selfCheckFailures().map { "agentkey: \($0)" }
         failures += CommandKeyView.selfCheckFailures().map { "cmdkey: \($0)" }

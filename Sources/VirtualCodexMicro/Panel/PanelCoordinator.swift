@@ -316,7 +316,7 @@ final class PanelCoordinator: ObservableObject {
         for session in found {
             let isNew = known[session.id] == nil
             cmuxHosted.insert(session.id)
-            known[session.id] = DiscoveredSession(session: session)
+            merge(DiscoveredSession(session: session))
             // Only record a state on first sight. Discovery reports whatever cmux
             // last knew, which is older than anything the event stream has already
             // told us, and re-recording it would walk a key backwards every poll.
@@ -452,20 +452,99 @@ final class PanelCoordinator: ObservableObject {
             record(reading.state, for: reading.sessionID, from: .claudeTranscript)
             engine.setLiveness(reading.liveness, for: reading.sessionID)
             knownPIDs[reading.sessionID] = reading.pid
-            known[reading.sessionID] = DiscoveredSession(
+            merge(DiscoveredSession(
                 session: AgentSession(
                     id: reading.sessionID,
                     backendID: "claude",
-                    title: Self.title(fromTranscriptPath: reading.transcriptPath),
-                    repoPath: Self.repoPath(fromTranscriptPath: reading.transcriptPath),
+                    title: reading.cwd.map { URL(fileURLWithPath: $0).lastPathComponent }
+                        ?? Self.title(fromTranscriptPath: reading.transcriptPath),
+                    // Only what the transcript actually stated. No fallback on purpose:
+                    // this field decides identity in `identityDoubt`, and a decoded
+                    // guess made every hyphenated repo look like a different one. A
+                    // title may be approximate; this may not.
+                    repoPath: reading.cwd,
+                    branch: reading.gitBranch,
                     state: reading.state,
                     confidence: .inferred,
                     // Observed: a session we did not spawn cannot be typed into.
                     capabilities: .observed
                 ),
                 pid: reading.pid
+            ))
+        }
+    }
+
+    /// Fold a fresh sighting into `known` without letting one observer undo what
+    /// another established about *reachability*.
+    ///
+    /// Two writers land here for the same session: `pollCmux`, which knows the
+    /// surface and can therefore focus and approve, and `ingest`, which reads the
+    /// transcript and can only ever say "claude, observed". Both used to assign
+    /// `known[id]` outright, so the record was simply whichever polled last — the
+    /// backend flip-flopped, and the reconnect check read that as the session
+    /// having changed identity and demanded a rebind. It also downgraded a session
+    /// we could approve into one we could only colour, which is the same fault
+    /// `followCmux` already guards against, reached through a second caller.
+    ///
+    /// So: identity comes from the session id, metadata from the latest sighting,
+    /// and reachability from whichever observer offers more of it. A pid is kept
+    /// once seen — `pollCmux` has none, and dropping it makes a live session
+    /// unverifiable.
+    private func merge(_ found: DiscoveredSession) {
+        known[found.id] = Self.merging(found, into: known[found.id])
+    }
+
+    /// Pure so it can be checked; see `selfCheckFailures`.
+    static func merging(_ found: DiscoveredSession, into existing: DiscoveredSession?) -> DiscoveredSession {
+        guard let existing else { return found }
+        var session = found.session
+        if existing.session.capabilities.rawValue.nonzeroBitCount
+            > session.capabilities.rawValue.nonzeroBitCount {
+            session.backendID = existing.session.backendID
+            session.capabilities = existing.session.capabilities
+        }
+        return DiscoveredSession(session: session, pid: found.pid ?? existing.pid)
+    }
+
+    static func selfCheckFailures() -> [String] {
+        var failures: [String] = []
+        func check(_ name: String, _ condition: Bool) {
+            if !condition { failures.append(name) }
+        }
+        func found(
+            _ backend: String, _ capabilities: SessionCapabilities,
+            state: AgentState = .running, pid: Int32? = nil, title: String = "t"
+        ) -> DiscoveredSession {
+            DiscoveredSession(
+                session: AgentSession(id: "s", backendID: backend, title: title,
+                                      state: state, capabilities: capabilities),
+                pid: pid
             )
         }
+        let cmux = found("cmux", [.focus, .approve, .reject], pid: nil, title: "hydra")
+        let tail = found("claude", .observed, state: .complete, pid: 42, title: "codex-micro")
+
+        // The bug: the transcript poll overwrote the cmux record, so the backend
+        // flip-flopped and approve/reject was lost. Whichever order they arrive in,
+        // the reachable backend has to survive.
+        let tailLast = merging(tail, into: cmux)
+        check("the transcript poll dropped the cmux backend", tailLast.session.backendID == "cmux")
+        check("the transcript poll dropped approve",
+              tailLast.session.capabilities.contains(.approve))
+        check("the transcript poll's fresher state was lost", tailLast.session.state == .complete)
+        // cmux reports no pid; losing the tailer's makes a live session unverifiable
+        // and was enough on its own to force a rebind prompt.
+        check("a known pid was lost", tailLast.pid == 42)
+
+        let cmuxLast = merging(cmux, into: tail)
+        check("cmux did not win reachability when it polled last",
+              cmuxLast.session.backendID == "cmux")
+        check("cmux lost the pid the tailer had already seen", cmuxLast.pid == 42)
+        check("cmux's own metadata was discarded", cmuxLast.session.title == "hydra")
+
+        check("a first sighting was not taken as-is",
+              merging(cmux, into: nil).session.backendID == "cmux")
+        return failures
     }
 
     /// The reject path. A rejected permission prompt fires no hook at all, so the
@@ -530,8 +609,13 @@ final class PanelCoordinator: ObservableObject {
 
     private var discoveredSessions: [DiscoveredSession] { Array(known.values) }
 
-    /// The project slug is the cwd with "/" replaced by "-"; enough to show a
-    /// recognisable name without pretending we know the repo layout.
+    /// Cosmetic only — never assign this to `repoPath`.
+    ///
+    /// The project directory name is the cwd with `/` replaced by `-`, and that is a
+    /// one-way transform: `-Users-me-code-codex-micro` decodes to
+    /// `/Users/me/code/codex/micro`, which is not where anything lives. Fine as a
+    /// last-resort label, wrong as a fact — used as one it made every repo with a
+    /// hyphen in its name compare unequal to itself and demand a rebind.
     private static func repoPath(fromTranscriptPath path: String) -> String? {
         let slug = URL(fileURLWithPath: path).deletingLastPathComponent().lastPathComponent
         guard !slug.isEmpty else { return nil }

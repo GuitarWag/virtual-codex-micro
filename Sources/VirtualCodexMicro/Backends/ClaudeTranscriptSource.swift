@@ -112,6 +112,11 @@ public struct ClaudeTranscriptSource: Sendable {
         /// in. It can only ever take amber down, never light it. `StateEngine`'s
         /// `clearNeedsInput` is the other half.
         public let promptClearedAt: Date?
+        /// The newest `cwd` the transcript states, and the branch beside it. `nil`
+        /// when no record in the tail carries one; callers must not substitute a
+        /// guess decoded from the project directory name — see `Record.cwd`.
+        public let cwd: String?
+        public let gitBranch: String?
         /// Why this state, in words, for the tooltip and the log. Structural facts
         /// only: no prompt text, no tool names, no paths from inside the transcript.
         public let reason: String
@@ -173,6 +178,10 @@ public struct ClaudeTranscriptSource: Sendable {
                 liveness: pid == nil ? .unknown : .alive,
                 pid: pid,
                 promptClearedAt: Self.promptCleared(in: cursor.records),
+                // Newest wins: a session that changed directory mid-run should report
+                // where it is now, not where it started.
+                cwd: cursor.records.reversed().compactMap(\.cwd).first,
+                gitBranch: cursor.records.reversed().compactMap(\.gitBranch).first,
                 reason: reason
             ))
         }
@@ -579,9 +588,17 @@ public struct ClaudeTranscriptSource: Sendable {
         let sessionIDSnake: String?
         let sessionIDCamel: String?
         let message: Message?
+        /// The session's real working directory, stated by the record rather than
+        /// reconstructed from the project directory name. The directory name encodes
+        /// `/` as `-`, which is not invertible: a repo whose own name contains a
+        /// hyphen decodes to a path that never existed (`codex-micro` → `codex/micro`),
+        /// and the wrong path then loses to cmux's real cwd and reads as a different
+        /// repo. Present on most records, absent on some, so still optional.
+        let cwd: String?
+        let gitBranch: String?
 
         enum CodingKeys: String, CodingKey {
-            case type, subtype, timestamp, isApiErrorMessage, message
+            case type, subtype, timestamp, isApiErrorMessage, message, cwd, gitBranch
             case sessionIDSnake = "session_id"
             case sessionIDCamel = "sessionId"
         }
@@ -822,9 +839,20 @@ public extension ClaudeTranscriptSource {
             assistant("end_turn", textBlock(interruptText) + "," + textBlock(rejectionText), at: fresh),
         ]]
 
+        // 11. a record stating its own cwd, with a hyphen in the directory name.
+        // Decoding the project directory name instead turned this into
+        // `/Users/me/code/codex/micro`, a path that never existed, and the binding
+        // then compared unequal to itself every other poll.
+        let statedCWD = "/Users/me/code/codex-micro"
+        let stated = ["cwd-stated.jsonl": [
+            line("\"type\":\"assistant\"", "\"timestamp\":\"\(fresh)\"",
+                 "\"cwd\":\"\(statedCWD)\"", "\"gitBranch\":\"main\"",
+                 "\"message\":{\"stop_reason\":\"end_turn\",\"content\":[{\"type\":\"text\",\"text\":\"a\"}]}"),
+        ]]
+
         var fixtures: [String: [String]] = [:]
         for group in [boundary, midTool, doubled, resumed, asking, rejected, toolError,
-                      quotingOutput, interrupted, quoted] {
+                      quotingOutput, interrupted, quoted, stated] {
             fixtures.merge(group) { a, _ in a }
         }
 
@@ -867,6 +895,20 @@ public extension ClaudeTranscriptSource {
         }
 
         check("expected one reading per top-level transcript", withProcesses.count == fixtures.count)
+
+        let statedReading = withProcesses.first {
+            URL(filePath: $0.transcriptPath).lastPathComponent == "cwd-stated.jsonl"
+        }
+        check("the cwd the record stated was not read, got \(statedReading?.cwd ?? "nil")",
+              statedReading?.cwd == statedCWD)
+        check("the branch the record stated was not read", statedReading?.gitBranch == "main")
+        // Absent, not invented: a caller must be able to tell "no cwd stated" from a
+        // decoded guess, which is what stops the guess reaching `repoPath`.
+        check("a cwd was invented for records that state none",
+              state(withProcesses, "doubled-end-turn.jsonl") != nil
+                  && withProcesses.first {
+                      URL(filePath: $0.transcriptPath).lastPathComponent == "doubled-end-turn.jsonl"
+                  }?.cwd == nil)
         check(
             "subagent transcripts must be excluded",
             withProcesses.allSatisfy { !$0.transcriptPath.contains("/subagents/") }
