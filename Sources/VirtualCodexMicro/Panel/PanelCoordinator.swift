@@ -275,7 +275,10 @@ final class PanelCoordinator: ObservableObject {
     }
 
     private func followTranscripts() async {
-        for await readings in ClaudeTranscriptSource.updates() {
+        let updates = ClaudeTranscriptSource.updates(
+            liveSessions: { [weak self] in await self?.liveSessionMap() ?? [:] }
+        )
+        for await readings in updates {
             ingest(readings)
             autobindFreeSlots()
             refresh(discovered: discoveredSessions)
@@ -438,12 +441,15 @@ final class PanelCoordinator: ObservableObject {
     /// A pid we learned from a hook is checked with `kill(pid, 0)` rather than
     /// trusted: the session may have exited since the event, and a stale pid would
     /// resurrect a dead key.
+    /// The cwd side of the join comes from what the previous poll learned, so a
+    /// brand-new bare session takes one extra tick to go live. Worth it: the
+    /// alternative was a second inference pass inside the tailer.
     private func liveSessionMap() -> [String: Int32] {
-        var map = ClaudeTranscriptSource.liveSessions()
-        for (id, pid) in hookPIDs where map[id] == nil {
-            if PTYChild.isAlive(pid) { map[id] = pid }
-        }
-        return map
+        LivenessMap.current(
+            hookPIDs: hookPIDs,
+            workingDirectories: known.compactMapValues(\.session.repoPath),
+            registry: registry
+        )
     }
 
     private func ingest(_ readings: [ClaudeTranscriptSource.Reading]) {
@@ -718,7 +724,13 @@ final class PanelCoordinator: ObservableObject {
             registry: &registry,
             engine: &engine,
             discovered: discoveredSessions,
-            liveSessions: useDemoBackend ? nil : ClaudeTranscriptSource.liveSessions(),
+            // The union, not argv alone. Passing the narrow map here is what kept the
+            // hydra key stuck: `evidence` *deletes* a discovered session whose backend
+            // is liveness-covered and whose id the map lacks, so a bare `claude` — no
+            // id in argv — was erased before `reconnect` saw it and reported as "no
+            // live session carries id" while the process was running. Any liveness
+            // question in this app goes through `liveSessionMap`.
+            liveSessions: useDemoBackend ? nil : liveSessionMap(),
             at: Date()
         )
         log.record(ActivityEntry(at: Date(), event: .note(report.summary)))

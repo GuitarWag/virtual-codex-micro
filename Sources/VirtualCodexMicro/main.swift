@@ -154,23 +154,43 @@ if let pidText = ProcessInfo.processInfo.environment["VCM_FOCUS"], let pid = Int
 }
 
 if ProcessInfo.processInfo.environment["VCM_PROBE"] != nil {
-    // Same union the coordinator uses, or the probe reports a different reality
-    // than the app: argv alone cannot see a bare `claude`, and reading persisted
-    // pids is what closes that. A diagnostic that disagrees with the thing it is
-    // diagnosing is worse than no diagnostic.
-    var live = ClaudeTranscriptSource.liveSessions()
-    let persisted = SessionRegistry()
-    for binding in persisted.bindings.compactMap({ $0 }) {
-        if let pid = binding.pid, live[binding.sessionID] == nil, PTYChild.isAlive(pid) {
-            live[binding.sessionID] = pid
-        }
-    }
+    // Literally the same function the app uses, not a reimplementation of it. The
+    // previous version approximated the union and so reported a session the app
+    // could not see, which sent me looking for the fault in the wrong half of the
+    // program. A diagnostic that disagrees with the thing it diagnoses is worse
+    // than no diagnostic.
+    //
+    // One honest difference: the cwd join needs transcript cwds, which only exist
+    // after a poll, so the probe polls once with what it has and then rebuilds.
     var source = ClaudeTranscriptSource()
+    let firstPass = source.poll(now: Date(), liveSessions: LivenessMap.current(
+        hookPIDs: [:], workingDirectories: [:]
+    ))
+    let live = LivenessMap.current(
+        hookPIDs: [:],
+        workingDirectories: Dictionary(
+            firstPass.compactMap { reading in reading.cwd.map { (reading.sessionID, $0) } },
+            uniquingKeysWith: { first, _ in first }
+        )
+    )
     let readings = source.poll(now: Date(), liveSessions: live)
 
-    print("live claude processes with a --session-id: \(live.count)")
+    let bare = ClaudeTranscriptSource.bareClaudeWorkingDirectories()
+    print("live sessions (argv, hooks, persisted pids, cwd join): \(live.count)")
     for (id, pid) in live.sorted(by: { $0.key < $1.key }) {
-        print("  pid \(pid)  \(id)")
+        // Which source claimed it, because "why is this session invisible" was the
+        // question every time, and the answer was always a missing source.
+        // Deliberately vague past argv: the map returns a pid, not which source won,
+        // and inventing a specific answer here is how the previous probe came to
+        // report "--session-id" for a session that had no flags at all.
+        let via = ClaudeTranscriptSource.liveSessions()[id] != nil ? "argv"
+            : bare.values.contains(pid) ? "bare claude — remembered pid or cwd join"
+            : "remembered pid"
+        print("  pid \(pid)  \(id)  via \(via)")
+    }
+    print("\nbare `claude` processes (no id in argv): \(bare.count)")
+    for (directory, pid) in bare.sorted(by: { $0.key < $1.key }) {
+        print("  pid \(pid)  \(directory)")
     }
     print("\ntranscript readings: \(readings.count)")
     let interesting = readings.filter { $0.state != .unknown }

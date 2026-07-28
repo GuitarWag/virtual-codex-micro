@@ -55,6 +55,7 @@ enum SelfCheck {
         failures += FocusResolver.selfCheckFailures().map { "focus: \($0)" }
         failures += ClaudeTranscriptSource.selfCheckFailures().map { "tail: \($0)" }
         failures += SessionRegistry.selfCheckFailures().map { "registry: \($0)" }
+        failures += LivenessMap.selfCheckFailures().map { "liveness: \($0)" }
         failures += SessionPopover.selfCheckFailures().map { "popover: \($0)" }
         failures += ClaudeHookSource.selfCheckFailures().map { "hooks: \($0)" }
         failures += ActivityLog.selfCheckFailures().map { "activity: \($0)" }

@@ -193,12 +193,21 @@ public struct ClaudeTranscriptSource: Sendable {
 
     /// Polls forever, yielding the full set of readings whenever any session's
     /// state, evidence time or liveness changes. 200ms is measured sufficient
-    /// (min 0.018s, p50 0.146s, max 0.231s detection); `ps` runs every tenth tick,
-    /// matching the spike's 2s liveness cadence.
+    /// (min 0.018s, p50 0.146s, max 0.231s detection); liveness is refreshed every
+    /// tenth tick, matching the spike's 2s cadence.
+    ///
+    /// `liveSessions` has no default on purpose. It used to call the argv scan
+    /// directly, and since this stream — not the one-shot `poll` — is what feeds the
+    /// running app, that quietly made argv the app's real definition of liveness no
+    /// matter what the rest of the program had been taught. A session started as a
+    /// bare `claude` was gated to `unknown` forever, and fixing the other three call
+    /// sites changed nothing because none of them was on this path. Every caller now
+    /// has to say where liveness comes from; see `LivenessMap`.
     public static func updates(
         projectsDirectory: URL = ClaudeTranscriptSource.defaultProjectsDirectory,
         quietAfter: TimeInterval = 60,
-        interval: Duration = .milliseconds(200)
+        interval: Duration = .milliseconds(200),
+        liveSessions provider: @escaping @Sendable () async -> [String: Int32]
     ) -> AsyncStream<[Reading]> {
         AsyncStream { continuation in
             let task = Task {
@@ -209,7 +218,7 @@ public struct ClaudeTranscriptSource: Sendable {
                 var previous: [String: Reading] = [:]
                 var tick = 0
                 while !Task.isCancelled {
-                    if tick % 10 == 0 { live = liveSessions() }
+                    if tick % 10 == 0 { live = await provider() }
                     tick += 1
                     let readings = tailer.poll(now: Date(), liveSessions: live)
                     // Keyed on the path, which is unique; two transcripts can resolve
@@ -501,8 +510,9 @@ public struct ClaudeTranscriptSource: Sendable {
             // it never got a pid to resolve a tty from.
             //
             // `--resume <uuid>` carries the session id being resumed, which is the id
-            // the transcript is keyed by, so it joins correctly. A bare `claude` with
-            // neither flag stays invisible, and that limit is real.
+            // the transcript is keyed by, so it joins correctly. A bare `claude` names
+            // no id at all — see `bareClaudeWorkingDirectories`, which joins those by
+            // working directory instead.
             for (index, field) in fields.enumerated() {
                 for flag in ["--session-id", "--resume", "-r"] {
                     if field == flag, index + 1 < fields.count {
@@ -518,6 +528,75 @@ public struct ClaudeTranscriptSource: Sendable {
             }
         }
         return live
+    }
+
+    /// Live `claude` processes that name no session id in argv, keyed by working
+    /// directory.
+    ///
+    /// Someone who types plain `claude` gets a session whose argv carries nothing to
+    /// join on, so `liveSessions` cannot see it and the session reads as exited: the
+    /// hydra key sat at "no live session carries id …" while the process was running
+    /// the whole time, and its transcript was being appended to.
+    ///
+    /// The working directory closes it. The transcript states its own `cwd`, the
+    /// process has one, and they are the same directory. A cwd claimed by two bare
+    /// processes is dropped rather than guessed at — attributing a pid to the wrong
+    /// session would mark a dead one alive, which is the failure this whole source
+    /// gates `idle` and `complete` to avoid.
+    ///
+    /// Ceiling: one bare session per directory. Two plain `claude` runs in the same
+    /// repo stay invisible, same as before, and say so by being absent.
+    public static func bareClaudeWorkingDirectories() -> [String: Int32] {
+        let ps = Process()
+        ps.executableURL = URL(filePath: "/bin/ps")
+        ps.arguments = ["-Ao", "pid=,command="]
+        let pipe = Pipe()
+        ps.standardOutput = pipe
+        ps.standardError = FileHandle.nullDevice
+        guard (try? ps.run()) != nil else { return [:] }
+        let data = (try? pipe.fileHandleForReading.readToEnd()) ?? Data()
+        ps.waitUntilExit()
+
+        var byDirectory: [String: Int32] = [:]
+        var ambiguous: Set<String> = []
+        for pid in barePIDs(inPSOutput: String(decoding: data, as: UTF8.self)) {
+            guard let directory = workingDirectory(of: pid) else { continue }
+            if byDirectory[directory] != nil { ambiguous.insert(directory) }
+            byDirectory[directory] = pid
+        }
+        for directory in ambiguous { byDirectory[directory] = nil }
+        return byDirectory
+    }
+
+    /// Pure half of the above, so the filtering is checkable without live processes.
+    static func barePIDs(inPSOutput output: String) -> [Int32] {
+        var pids: [Int32] = []
+        for line in output.split(separator: "\n") {
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard let pid = Int32(fields.first ?? ""), fields.count == 2 else { continue }
+            // The command must *be* claude, not merely contain it. `grep claude`, a
+            // path with the word in it and this app itself all contain it; matching on
+            // substring is how an earlier version reported a text search as a session.
+            // And exactly two fields, because anything carrying a flag has an id for
+            // `liveSessions` to join on and does not belong here.
+            let command = String(fields[1])
+            guard command == "claude" || command.hasSuffix("/claude") else { continue }
+            pids.append(pid)
+        }
+        return pids
+    }
+
+    /// A process's cwd, straight from the kernel. `lsof` would answer too but costs a
+    /// subprocess per call on a path that runs every few seconds.
+    static func workingDirectory(of pid: Int32) -> String? {
+        var info = proc_vnodepathinfo()
+        let size = MemoryLayout<proc_vnodepathinfo>.size
+        guard proc_pidinfo(pid, PROC_PIDVNODEPATHINFO, 0, &info, Int32(size)) == Int32(size)
+        else { return nil }
+        let path = withUnsafePointer(to: &info.pvi_cdir.vip_path) {
+            String(cString: UnsafeRawPointer($0).assumingMemoryBound(to: CChar.self))
+        }
+        return path.isEmpty ? nil : path
     }
 
     /// A session id is a uuid. Checked rather than assumed because `-r` also takes
@@ -893,6 +972,27 @@ public extension ClaudeTranscriptSource {
         func state(_ readings: [Reading], _ file: String) -> AgentState? {
             readings.first { URL(filePath: $0.transcriptPath).lastPathComponent == file }?.state
         }
+
+        // A bare `claude` is the only kind this can see, and only when the line is
+        // exactly that. The rejected lines are all real: the second is what a session
+        // with a joinable id looks like (liveSessions' job), and the rest are things a
+        // substring match previously mistook for a session.
+        let psOutput = """
+        3448 claude
+        3449 claude --resume aaaaaaaa-0000-0000-0000-00000000004a
+        3450 /opt/homebrew/bin/claude
+        3451 grep claude
+        3452 /Users/me/claude-notes/vim
+        3453 /Users/me/dev/VirtualCodexMicro.app/Contents/MacOS/VirtualCodexMicro
+        3454 claudia
+        """
+        check("the bare-claude scan did not find exactly the two bare sessions, got "
+                + "\(barePIDs(inPSOutput: psOutput))",
+              barePIDs(inPSOutput: psOutput) == [3448, 3450])
+        // Its own cwd is the one answer that can be checked against a known truth.
+        check("a process's own working directory did not resolve",
+              workingDirectory(of: getpid()) == FileManager.default.currentDirectoryPath)
+        check("a dead pid reported a working directory", workingDirectory(of: 0) == nil)
 
         check("expected one reading per top-level transcript", withProcesses.count == fixtures.count)
 
